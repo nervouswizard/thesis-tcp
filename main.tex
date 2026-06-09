@@ -224,7 +224,22 @@ commentstyle=\upshape,% 預設是斜體字，會影響註解裏的英文，改�
 % 則請把下列介於 >>> 與 <<< 之間
 % 的文字行關掉 (行首加上百分號), 會以「第 1 章」呈現
 %% 中文數字章別 >>>
-%\input{yzu_chnum.tex}
+\renewcommand\countermapping[1]{\CJKnumber{#1}}
+\renewcommand\tocprechaptername{第}
+\renewcommand\tocpostchaptername{章}
+\setlength{\tocChNumberWidth}{2.5em}
+\makeatletter
+\def\@makechapterhead#1{%
+  {\parindent \z@ \centering \normalfont
+    \ifnum \c@secnumdepth >\m@ne
+        \LARGE\bfseries \prechaptername\countermapping{\thechapter}\postchaptername
+    \fi
+    \hspace{1em}
+    \interlinepenalty\@M
+    \LARGE \bfseries #1\par\nobreak
+    \vskip 20\p@
+  }}
+\makeatother
 %% <<< 中文數字章別
 
 %%% 以下是載入前頁、本文、後頁
