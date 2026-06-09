@@ -1,3 +1,167 @@
 \hspace{24pt}
 
-Add your algorithms/architecture design here.
+本研究提出的流程以單張國畫圖片為唯一輸入，分為以下四個主要階段：
+（一）以 Marigold-DC 在無引導模式下取得初步深度圖；
+（二）使用者透過互動工具標注稀疏深度控制點，並以本研究設計的
+\textit{ChinesePaintingLoss} 引導 Marigold-DC 重新優化，取得精煉深度圖；
+（三）將精煉深度圖反投影為三維點雲，並沿攝影機軌跡渲染成點雲影片；
+（四）以點雲影片為幾何條件輸入 Uni3C 的 PCDController，
+由視訊擴散模型生成最終的 2.5D 動態影片。
+
+\section{深度估算}
+
+\subsection{初步深度估算}
+
+本研究以 Marigold \cite{marigold} 為基礎深度估算模型。
+Marigold 將 Stable Diffusion 的擴散去噪過程應用於深度預測，
+憑藉大規模影像—文字預訓練累積的視覺先驗，
+可在不需微調的情況下對任意輸入圖片生成仿射不變深度圖（affine-invariant depth map）。
+本研究首先以無引導模式執行 Marigold-DC \cite{marigolddc}，
+取得初步深度圖 $D_{\mathrm{rough}}$，
+作為人工標注稀疏控制點前的觀察依據。
+
+\subsection{稀疏深度控制點標注}
+
+為修正 $D_{\mathrm{rough}}$ 中因國畫風格造成的估算偏差，
+本研究開發互動式標注工具。
+使用者可在深度判斷明顯有誤的位置點選控制點，
+並以滑桿指定正確深度值（0 為最遠，1 為最近）。
+工具輸出稀疏深度圖 $D_{\mathrm{sparse}} \in [0,1]^{H \times W}$
+與對應遮罩 $\mathbf{M} \in \{0,1\}^{H \times W}$，
+其中 $\mathbf{M}_{i,j} = 1$ 代表該像素有使用者標注值。
+
+\subsection{損失函數設計}
+
+取得稀疏控制點後，本研究以其為引導重新執行 Marigold-DC 的去噪優化。
+本研究設計的總損失由兩部分構成：
+（一）\textit{ChinesePaintingLoss}，包含四項針對國畫特性設計的損失分項；
+（二）輔助排序損失 $\mathcal{L}_{\mathrm{rank}}$，確保控制點間的相對深度關係正確。
+完整總損失定義為：
+
+\begin{equation}
+  \mathcal{L}_{\mathrm{final}} =
+    \underbrace{
+      \lambda_m \mathcal{L}_{\mathrm{metric}} +
+      \lambda_b \mathcal{L}_{\mathrm{brush}} +
+      \lambda_w \mathcal{L}_{\mathrm{white}} +
+      \lambda_l \mathcal{L}_{\mathrm{lap}}
+    }_{\textit{ChinesePaintingLoss}} +
+    \lambda_r \mathcal{L}_{\mathrm{rank}}
+\end{equation}
+
+其中 $\lambda_m = 1.0$，$\lambda_b = 0.5$，$\lambda_w = 0.2$，$\lambda_l = 0.5$，$\lambda_r = 1.0$，
+所有分項在每個去噪步驟中統一反向傳播。
+以下分別說明五個損失分項。
+
+\paragraph{Metric Loss}
+
+對稀疏控制點位置同時施加 L1 與 L2 監督，
+確保預測深度在使用者標注位置的絕對數值正確：
+
+\begin{equation}
+  \mathcal{L}_{\mathrm{metric}} =
+    \bigl\| D_{\mathrm{pred}}[\mathbf{M}] - D_{\mathrm{sparse}}[\mathbf{M}] \bigr\|_1 +
+    \bigl\| D_{\mathrm{pred}}[\mathbf{M}] - D_{\mathrm{sparse}}[\mathbf{M}] \bigr\|_2^2
+\end{equation}
+
+\paragraph{筆觸感知平滑損失（Brushstroke-aware Smoothness Loss）}
+
+國畫墨色筆觸的局部亮度梯度較大，
+若直接以影像梯度作為邊緣權重的指數衰減，
+深度圖在筆觸邊界兩側將被強制分離，造成深度不連續。
+本研究引入最小連通性下界 $w_{\min}$，使平滑壓力永不為零：
+
+\begin{equation}
+  w_{i,j} = \max\!\Bigl( e^{-\alpha \|\nabla I\|_{i,j}},\; w_{\min} \Bigr)
+\end{equation}
+
+\begin{equation}
+  \mathcal{L}_{\mathrm{brush}} =
+    \frac{1}{HW} \sum_{i,j} w_{i,j}
+    \Bigl(
+      \bigl|\partial_x D_{\mathrm{pred}}\bigr|_{i,j} +
+      \bigl|\partial_y D_{\mathrm{pred}}\bigr|_{i,j}
+    \Bigr)
+\end{equation}
+
+其中 $\alpha = 1.0$、$w_{\min} = 0.2$，影像梯度 $\nabla I$ 以 Sobel 濾波器計算，
+並截斷至 $\|\nabla I\| \leq 2.0$ 以防止極端梯度值主導損失。
+
+\paragraph{拉普拉斯結構損失（Laplacian Loss）}
+
+墨色濃重的局部區域（如鬍鬚、眼眶）若以一階平滑損失處理仍可能在深度圖中形成突兀凹陷。
+本研究施加二階平滑（Laplacian）約束，並混入常數偏移使其不完全依賴邊緣強度：
+
+\begin{equation}
+  \mathcal{L}_{\mathrm{lap}} =
+    \frac{1}{HW} \sum_{i,j} \bigl(w_{i,j} + 0.5\bigr)\,|\nabla^2 D_{\mathrm{pred}}|_{i,j}
+\end{equation}
+
+加入偏移量 0.5 使拉普拉斯懲罰在邊緣處仍具備一定力度，
+強制全局深度曲率連續，而非僅約束平坦區域。
+
+\paragraph{留白正則化（Whitespace Regularization）}
+
+國畫以大片留白表達遠景，但深度估算模型易將其誤判為近處平面。
+本研究以可微分 sigmoid 函數偵測留白區域，
+並以均方誤差懲罰其深度偏離最遠端（$d_{\mathrm{far}} = 0$）：
+
+\begin{equation}
+  M^{\mathrm{white}}_{i,j} = \sigma\!\bigl((I^{\mathrm{gray}}_{i,j} - \tau) \cdot 20\bigr)
+\end{equation}
+
+\begin{equation}
+  \mathcal{L}_{\mathrm{white}} =
+    \frac{1}{HW} \sum_{i,j} M^{\mathrm{white}}_{i,j} \cdot D_{\mathrm{pred},i,j}^{\,2}
+\end{equation}
+
+其中 $I^{\mathrm{gray}} \in [0,1]$ 為歸一化灰度值，$\tau = 0.85$ 為留白亮度閾值，$\sigma$ 為 sigmoid 函數。
+
+\paragraph{排序損失（Ranking Loss）}
+
+除 \textit{ChinesePaintingLoss} 外，本研究另設計輔助排序損失，
+對稀疏控制點兩兩配對，以帶邊界的 hinge loss 強制預測深度的相對大小
+與使用者標注一致：
+
+\begin{equation}
+  \mathcal{L}_{\mathrm{rank}} =
+    \frac{1}{\binom{N}{2}} \sum_{i < j}
+    \begin{cases}
+      \mathrm{ReLU}\!\bigl(D_{\mathrm{pred}}[j] - D_{\mathrm{pred}}[i] + \delta\bigr)
+        & \text{若 } D_{\mathrm{sparse}}[i] > D_{\mathrm{sparse}}[j] \\[4pt]
+      \mathrm{ReLU}\!\bigl(D_{\mathrm{pred}}[i] - D_{\mathrm{pred}}[j] + \delta\bigr)
+        & \text{若 } D_{\mathrm{sparse}}[i] < D_{\mathrm{sparse}}[j] \\[4pt]
+      0 & \text{否則}
+    \end{cases}
+\end{equation}
+
+其中 $N$ 為控制點總數，$\delta = 0.1$ 為排序邊界（margin）。
+此損失確保深度的相對前後關係正確，避免出現前景點被估算為遠於背景的情形。
+
+\section{點雲生成與渲染}
+
+取得精煉深度圖 $D_{\mathrm{refined}}$ 後，
+本研究以 Depth Anything V3 \cite{depthanything} 所估算的公制深度為基礎，
+透過反投影（unprojection）將深度圖轉為帶有原圖色彩的三維點雲（point cloud）。
+給定相機內參矩陣 $\mathbf{K}$，每個像素 $(u, v)$ 對應的三維座標為：
+
+\begin{equation}
+  \begin{pmatrix} X \\ Y \\ Z \end{pmatrix} =
+  D_{\mathrm{refined}}(u,v) \cdot \mathbf{K}^{-1}
+  \begin{pmatrix} u \\ v \\ 1 \end{pmatrix}
+\end{equation}
+
+點雲在三維空間中明確記錄每個點的幾何位置，
+可沿著預設的攝影機軌跡進行標準圖形學光柵化渲染（rasterization），
+產生一段帶有真實視差感的初步 2.5D 點雲影片。
+渲染結果含有因視角偏移而露出的遮擋破洞（holes），
+但為後續的視訊擴散模型提供了明確的空間幾何條件。
+
+\section{視訊擴散生成}
+
+本研究以點雲影片作為幾何引導條件，輸入 Uni3C \cite{uni3c} 的 PCDController。
+PCDController 將點雲渲染影格編碼為幾何引導訊號，
+驅動視訊擴散模型在去噪過程中嚴格遵守三維幾何約束：
+一方面以擴散模型的生成能力填補遮擋破洞，
+另一方面藉助 Uni3C 的風格一致性機制維持國畫的整體視覺風格，
+最終輸出流暢完整且具真實視差感的 2.5D 動態影片。

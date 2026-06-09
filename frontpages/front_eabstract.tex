@@ -1,5 +1,17 @@
-Add your abstract here.
+This thesis proposes an end-to-end pipeline for generating 2.5D animated videos from a single
+Traditional Chinese Painting (TCP) image.
+Existing diffusion-based monocular depth estimation models tend to produce erroneous depth maps
+for Chinese paintings due to domain gaps such as white-space semantics and abstract brushstrokes.
+To address this, we incorporate Marigold-DC, enabling users to guide depth estimation with
+sparse depth control points, and design \textit{ChinesePaintingLoss}, a composite loss function
+tailored to Chinese painting characteristics, comprising brushstroke-aware smoothness loss,
+Laplacian loss, whitespace regularization, and a ranking loss.
+The refined depth map is then unprojected into a colored 3D point cloud using metric depth
+estimated by Depth Anything V3, rasterized along a predefined camera trajectory to produce a
+parallax-rich point cloud video, and finally fed into Uni3C's PCDController, where a video
+diffusion model fills occlusion holes while preserving the painterly style, yielding a smooth,
+complete 2.5D animated video.
 
 \begin{flushleft}
-\mbox{{\bf Keywords}: Keyword1, Keyword2, Keyword3}
+\mbox{{\bf Keywords}: Chinese Painting, 2.5D Video, Depth Estimation, Diffusion Model, Point Cloud Rendering}
 \end{flushleft}
