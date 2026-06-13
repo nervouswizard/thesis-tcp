@@ -1,3 +1,4 @@
+% !TEX root = ../main.tex
 \hspace{24pt}
 
 本研究提出的流程以單張國畫圖片為唯一輸入，分為以下四個主要階段：
@@ -12,11 +13,14 @@
 
 \subsection{初步深度估算}
 
-本研究以 Marigold \cite{marigold} 為基礎深度估算模型。
-Marigold 將 Stable Diffusion 的擴散去噪過程應用於深度預測，
-憑藉大規模影像—文字預訓練累積的視覺先驗，
-可在不需微調的情況下對任意輸入圖片生成仿射不變深度圖（affine-invariant depth map）。
-本研究首先以無引導模式執行 Marigold-DC \cite{marigolddc}，
+如第二章所述，監督式模型因 domain gap 無法直接套用於國畫，
+Depth Anything V3 雖具較強泛化能力但缺乏使用者干預介面，
+原始 Marigold 亦無法在推論階段接受外部約束。
+Marigold-DC \cite{marigolddc} 兼顧擴散先驗的零樣本泛化能力與稀疏深度引導機制，
+在訓練資料稀缺且需局部修正的國畫場景下最為適用，
+故本研究以其為深度估算骨幹。
+
+首先以無引導模式執行 Marigold-DC，
 取得初步深度圖 $D_{\mathrm{rough}}$，
 作為人工標注稀疏控制點前的觀察依據。
 
