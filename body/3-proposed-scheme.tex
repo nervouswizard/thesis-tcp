@@ -1,30 +1,330 @@
 % !TEX root = ../main.tex
 \hspace{24pt}
 
-本研究提出的流程以單張國畫圖片為唯一輸入，分為以下四個主要階段：
-（一）以 Marigold-DC 在無引導模式下取得初步深度圖；
-（二）使用者透過互動工具標注稀疏深度控制點，並以本研究設計的
-\textit{ChinesePaintingLoss} 引導 Marigold-DC 重新優化，取得精煉深度圖；
-（三）將精煉深度圖反投影為三維點雲，並沿攝影機軌跡渲染成點雲影片；
-（四）以點雲影片為幾何條件輸入 Uni3C 的 PCDController，
-由視訊擴散模型生成最終的 2.5D 動態影片。
+本章節詳細說明本研究流程的各個技術環節。
+第~\ref{sec:prerequisite}~節先介紹前置依賴的擴散模型架構，
+包含 DDPM 去噪機率模型的訓練原理、DDIM 隱式確定性採樣機制、
+LDM 潛在擴散架構（含 VAE 與 U-Net 去噪器），
+以及 Marigold 以此架構為基礎的訓練與推論機制，
+作為理解後續 Marigold-DC 稀疏點引導深度圖的前置知識。
+第~\ref{sec:depth}~節說明深度估算流程，
+涵蓋以 Depth Anything V2\cite{depthanythingv2} 取得初步深度圖、互動式稀疏控制點標注，
+以及專為國畫設計的 \textit{ChinesePaintingLoss} 損失函數。
+第~\ref{sec:pointcloud}~節介紹如何將精煉深度圖反投影為三維點雲並渲染成點雲影片。
+第~\ref{sec:video}~節說明如何以點雲影片引導 Uni3C 的 PCDController 生成最終的 2.5D 動態影片。
+本研究的系統圖如~\ref{fig:pipeline}所示。
+
+\section{前置：擴散模型架構}
+\label{sec:prerequisite}
+
+\subsection{去噪擴散機率模型（DDPM）}
+
+去噪擴散機率模型（Denoising Diffusion Probabilistic Models，DDPM）\cite{ddpm}
+以兩個相互對應的馬可夫鏈過程為核心。
+
+\textbf{前向過程（forward process）}為固定的加噪鏈，
+給定原始資料 $\mathbf{x}_0$，
+依序在時間步 $t = 1, \ldots, T$ 疊加高斯雜訊，
+使資料逐漸趨近純雜訊：
+
+\begin{equation}
+  q(\mathbf{x}_t \mid \mathbf{x}_0) =
+    \mathcal{N}\!\bigl(\mathbf{x}_t;\;\sqrt{\bar{\alpha}_t}\,\mathbf{x}_0,\;(1-\bar{\alpha}_t)\mathbf{I}\bigr)
+\end{equation}
+
+其中 $\bar{\alpha}_t = \prod_{s=1}^{t}(1 - \beta_s)$，
+$\beta_s$ 為預先定義的噪聲排程（noise schedule），
+$\mathbf{I}$ 為單位矩陣（identity matrix），表示各維度雜訊相互獨立。
+當 $T$ 足夠大時，$\mathbf{x}_T \approx \mathcal{N}(\mathbf{0}, \mathbf{I})$。
+
+\textbf{反向過程（reverse process）}訓練以 $\theta$ 為可訓練參數的神經網路
+$\boldsymbol{\epsilon}_\theta(\mathbf{x}_t, t)$ 預測每步加入的雜訊，
+以均方誤差（mean squared error）為訓練目標：
+
+\begin{equation}
+  \mathcal{L}_{\mathrm{DDPM}} =
+    \mathbb{E}_{\mathbf{x}_0,\,\boldsymbol{\epsilon},\,t}
+    \bigl\|\boldsymbol{\epsilon} - \boldsymbol{\epsilon}_\theta(\mathbf{x}_t, t)\bigr\|^2
+\end{equation}
+
+其中 $\boldsymbol{\epsilon} \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$
+為前向過程中採樣的真實雜訊，$\boldsymbol{\epsilon}_\theta$ 為網路的預測值；
+兩者之差即為去噪誤差。
+
+訓練完成後，模型從 $\mathbf{x}_T \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$ 出發，
+每步先由神經網路估計去噪後的 $\hat{\mathbf{x}}_0$，
+再以隨機採樣更新至 $\mathbf{x}_{t-1}$，
+最終還原出 $\mathbf{x}_0$，如圖~\ref{fig:ddpm} 所示。
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.85\textwidth]{DDPM}
+  \caption{DDPM 反向採樣過程示意圖（取自 DDPM 原論文）。
+  實線箭頭表示學習到的去噪過程 $p_\theta(\mathbf{x}_{t-1} \mid \mathbf{x}_t)$，
+  虛線箭頭表示前向加噪過程 $q(\mathbf{x}_t \mid \mathbf{x}_{t-1})$。
+  模型從純雜訊 $\mathbf{x}_T$ 出發，沿馬可夫鏈逐步去噪，
+  最終還原出清晰的 $\mathbf{x}_0$。}
+  \label{fig:ddpm}
+\end{figure}
+
+\subsection{去噪擴散隱式模型（DDIM）}
+
+如圖~\ref{fig:ddpm} 所示，DDPM 的反向採樣沿著
+$\mathbf{x}_T \to \cdots \to \mathbf{x}_t \to \mathbf{x}_{t-1} \to \cdots \to \mathbf{x}_0$
+的馬可夫鏈逐步去噪，每一步均依賴前一步且包含隨機雜訊項，
+完整採樣需要 $T$（通常為 1000）步，推論速度緩慢。
+去噪擴散隱式模型（Denoising Diffusion Implicit Models，DDIM）\cite{ddim}
+以非馬可夫鏈（non-Markovian）重新定義反向採樣過程，
+在復用 DDPM 訓練權重的前提下大幅加速推論。
+
+DDIM 的核心觀察源自對 DDPM 訓練過程的分析。
+在 forward process 中，馬可夫鏈的聯合分佈為
+$q(\mathbf{x}_{1:T} \mid \mathbf{x}_0) = \prod_{t=1}^T q(\mathbf{x}_t \mid \mathbf{x}_{t-1})$，
+其中每一步均依賴前一步。
+然而 DDPM 的訓練目標（均方誤差損失）僅需對每個時間步 $t$
+從 $\mathbf{x}_0$ 直接採樣 $\mathbf{x}_t$，
+所用的是邊際分佈（marginal distribution）
+$q(\mathbf{x}_t \mid \mathbf{x}_0) = \mathcal{N}(\sqrt{\bar{\alpha}_t}\,\mathbf{x}_0,\,(1-\bar{\alpha}_t)\mathbf{I})$。
+所謂邊際分佈，是指將聯合分佈中的中間變數
+$\mathbf{x}_1, \ldots, \mathbf{x}_{t-1}$ 積分消去後，
+僅保留 $\mathbf{x}_t$ 與 $\mathbf{x}_0$ 之間的直接關係；
+在 DDPM 中此邊際具有封閉解，可由 $\mathbf{x}_0$ 一步採樣至任意時間步。
+DDIM 指出：只要新定義的非馬可夫鏈前向過程與原始馬可夫鏈具有相同的邊際分佈
+$q(\mathbf{x}_t \mid \mathbf{x}_0)$，
+DDPM 的訓練損失便不受影響，因此可以直接沿用已訓練的網路權重。
+基於此，DDIM 定義完全確定性的更新規則，
+透過神經網路預測的雜訊 $\boldsymbol{\epsilon}_\theta(\mathbf{x}_t, t)$，
+先還原出對原始資料的估計：
+
+\begin{equation}
+  \hat{\mathbf{x}}_0 =
+    \frac{\mathbf{x}_t - \sqrt{1-\bar{\alpha}_t}\,\boldsymbol{\epsilon}_\theta(\mathbf{x}_t, t)}%
+         {\sqrt{\bar{\alpha}_t}}
+\end{equation}
+
+再以確定性公式更新至前一時間步：
+
+\begin{equation}
+  \mathbf{x}_{t-1} =
+    \sqrt{\bar{\alpha}_{t-1}}\,\hat{\mathbf{x}}_0
+    + \sqrt{1 - \bar{\alpha}_{t-1}}\,\boldsymbol{\epsilon}_\theta(\mathbf{x}_t, t)
+\end{equation}
+
+此更新規則不含任何隨機雜訊項，
+給定相同的起始雜訊 $\mathbf{x}_T$ 必然輸出相同的 $\mathbf{x}_0$。
+由於每步不依賴前一步的隨機性，
+DDIM 可對時間步序列進行子採樣（subsampling），
+跳過大部分的中間時間步，
+僅以 20--50 步完成原本需要 1000 步的採樣，
+推論速度提升約 10 至 50 倍，且生成品質幾乎不下降。
+此外確定性採樣使 DDIM 反轉（DDIM inversion）成為可能：
+對已知圖片進行前向加噪可精確還原其對應的潛在雜訊 $\mathbf{x}_T$，
+為影像編輯與以圖片為條件的生成任務提供了關鍵技術基礎。
+
+\subsection{潛在擴散模型（LDM）}
+
+由於 DDPM 與 DDIM 均在像素空間操作，
+對高解析度圖片的記憶體與計算需求極高。
+潛在擴散模型（Latent Diffusion Models，LDM）\cite{ldm}
+將擴散過程移至低維潛在空間以降低運算需求，
+整體架構如圖~\ref{fig:ldm} 所示，由兩個主要元件構成。
+
+\textbf{變分自動編碼器（Variational Autoencoder，VAE）}
+負責像素空間與潛在空間之間的轉換，
+其架構源自 Esser 等人提出的 VQGAN \cite{vqgan}，
+LDM 採用相同的網路結構但以 KL 散度正則化取代向量量化（VQ）作為潛在空間約束。
+編碼器 $\mathcal{E}$ 將圖片 $\mathbf{x} \in \mathbb{R}^{H \times W \times 3}$
+壓縮至潛在向量 $\mathbf{z} = \mathcal{E}(\mathbf{x}) \in \mathbb{R}^{h \times w \times c}$；
+以本研究所採用的 Stable Diffusion v2 VAE 為例，
+其空間下採樣倍率（downsampling factor）$f=8$，
+即高度與寬度各縮減 8 倍（$h = H/8$，$w = W/8$），
+總空間像素數壓縮至原始的 $1/f^2 = 1/64$，通道數 $c = 4$；
+解碼器 $\mathcal{D}$ 則將潛在向量還原至像素空間：$\hat{\mathbf{x}} = \mathcal{D}(\mathbf{z})$。
+自然圖像與深度圖在像素空間中存在大量空間冗餘——
+相鄰像素在語意上高度相關，其真實資訊量遠低於原始像素數量。
+VAE 透過同時最小化重建誤差（reconstruction loss）與
+對潛在分佈施加的 KL 散度正則化（KL regularization），
+學習一個低維潛在流形（latent manifold），
+使 $\mathcal{E}$ 能在每個空間維度各縮減 $f=8$ 倍（總像素數壓縮 $f^2=64$ 倍）的同時，
+保留足以重建原始內容的語意與結構資訊，
+而 $\mathcal{D}$ 則從此流形還原像素細節。
+
+\textbf{U-Net 去噪器}是 LDM 的核心運算模組，
+以 Ronneberger 等人提出的 U-Net \cite{unet} 為基礎，
+採對稱的編解碼架構搭配跳躍連接（skip connection）建構（圖~\ref{fig:ldm} 中央綠色區域）。
+右側的條件編碼器 $\tau_\theta$ 可接受多種形式的條件輸入
+（語意圖、文字、特徵表示、圖像），
+透過交叉注意力機制（cross-attention，圖中 Q/K/V 模組）
+將編碼後的向量注入 U-Net 各層，使去噪預測以條件內容為引導。
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.9\textwidth]{LDM}
+  \caption{LDM 整體架構（取自原論文 Figure 3）：
+  左側為像素空間的 VAE 編解碼器（$\mathcal{E}$/$\mathcal{D}$），
+  中央為在潛在空間執行擴散與去噪的 U-Net $\boldsymbol{\epsilon}_\theta$，
+  右側為透過 cross-attention 注入條件的編碼器 $\tau_\theta$。}
+  \label{fig:ldm}
+\end{figure}
+
+\subsection{Marigold}
+\label{subsec:marigold}
+
+Marigold \cite{marigold} 是一個將預訓練的文字轉圖像擴散模型
+直接重新用於單目深度估算任務的方法，
+以去噪擴散過程取代傳統的判別式回歸。
+其核心思想是以預訓練的文字轉圖像 LDM（Stable Diffusion v2）\cite{ldm}作為模型起點，
+直接繼承其在大規模圖文資料集 LAION-5B \cite{LAION-5B}
+上學習到的豐富視覺先驗知識。
+相較於在大規模真實場景深度資料集上從頭訓練的監督式方法，
+Marigold 僅需以少量合成場景深度資料（Hypersim、Virtual KITTI）進行微調，
+即可借助預訓練階段積累的跨場景視覺先驗，
+對未見過的真實世界場景進行零樣本泛化深度估算。
+整體訓練流程如圖~\ref{fig:marigold} 所示。
+
+\paragraph{訓練階段}
+Marigold 以 RGB 圖片 $\mathbf{x}$ 與對應深度圖 $\mathbf{d}$ 作為一組訓練對。
+VAE 編碼器（圖中鎖頭標示為凍結，訓練期間不更新權重）
+分別將兩者壓縮至潛在空間（Latent space）：
+$\mathbf{z}^{(\mathbf{x})} = \mathcal{E}(\mathbf{x})$ 為圖像潛在編碼，
+$\mathbf{z}^{(\mathbf{d})} = \mathcal{E}(\mathbf{d})$ 為深度潛在編碼。
+從均勻分佈 $t \sim \mathcal{U}(T)$ 採樣時間步，並從 $\boldsymbol{\epsilon} \sim \mathcal{N}(\mathbf{0},\mathbf{I})$ 採樣雜訊，
+對深度潛在編碼加噪以得到 $\mathbf{z}_t^{(\mathbf{d})}$。
+將圖像潛在編碼 $\mathbf{z}^{(\mathbf{x})}$ 與帶噪深度 $\mathbf{z}_t^{(\mathbf{d})}$ 在通道維度拼接（concat）後，
+輸入 Latent Diffusion U-Net 預測雜訊 $\hat{\boldsymbol{\epsilon}}$。
+訓練目標為去噪均方誤差：
+\begin{equation}
+  \mathcal{L}_{\mathrm{Marigold}} =
+    \mathbb{E}_{\mathbf{x},\mathbf{d},\boldsymbol{\epsilon},t}
+    \bigl\|\boldsymbol{\epsilon} - \hat{\boldsymbol{\epsilon}}_\theta(\mathbf{z}_t^{(\mathbf{d})}, \mathbf{z}^{(\mathbf{x})}, t)\bigr\|^2
+\end{equation}
+
+\paragraph{推論階段}
+Marigold 推論時採用 DDIM 確定性採樣：
+深度潛在向量從 $\mathbf{z}_T^{(\mathbf{d})} \sim \mathcal{N}(\mathbf{0},\mathbf{I})$ 出發，
+以輸入圖片的潛在編碼 $\mathbf{z}^{(\mathbf{x})}$ 作為每步去噪的條件，
+迭代去噪後得到 $\mathbf{z}_0^{(\mathbf{d})}$，
+再由解碼器還原為深度圖 $D = \mathcal{D}(\mathbf{z}_0^{(\mathbf{d})})$。
+由於深度圖與 RGB 圖像具備相似的局部平滑性與空間相關結構，
+VAE 潛在空間的統計特性對深度模態同樣適用，
+Marigold 無須重新設計編解碼器，可直接沿用預訓練的 Stable Diffusion VAE。
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.9\textwidth]{marigold_pipeline}
+  \caption{Marigold fine-tuning 流程（取自原論文）。
+  上方路徑：RGB 圖片 $\mathbf{x}$ 經凍結的潛在編碼器壓縮為條件編碼 $\mathbf{z}^{(\mathbf{x})}$。
+  中間路徑：深度圖 $\mathbf{d}$ 同樣經凍結編碼器壓縮後，
+  與採樣雜訊 $\boldsymbol{\epsilon}$ 依時間步 $t$ 疊加，得到帶噪深度潛在向量 $\mathbf{z}_t^{(\mathbf{d})}$。
+  兩條路徑的潛在向量拼接後輸入 U-Net，預測雜訊 $\hat{\boldsymbol{\epsilon}}$，
+  訓練目標為最小化 $\|\boldsymbol{\epsilon} - \hat{\boldsymbol{\epsilon}}\|^2$。}
+  \label{fig:marigold}
+\end{figure}
 
 \section{深度估算}
+\label{sec:depth}
+
+\hspace{24pt}
+
+如第一章所述，現有深度估算模型在國畫上面臨顯著的 domain gap：
+留白區域易被誤判為近景平面，墨色濃淡與深度遠近的對應關係也不符合模型在真實照片上學習到的先驗。
+面對此問題，最直接的解法是以大量國畫深度標注資料重新訓練，
+但國畫深度資料集極為稀缺，人工標注成本極高，此路線在實際上不可行。
+本研究因此採用人機協作（human-in-the-loop）的三段式策略，
+以最小的人工介入達到針對特定畫作的深度修正效果：
+
+\begin{enumerate}
+  \item \textbf{初步深度估算}：
+        以判別式模型（Depth Anything V2）快速取得全圖深度預覽，
+        供使用者在不耗費大量時間的前提下觀察深度分佈、找出誤判區域。
+        此階段並不追求精準，目的是為下一步的人工判斷提供空間感的初始參考。
+
+  \item \textbf{稀疏深度控制點標注}：
+        使用者依據初步深度圖，僅需在少數關鍵位置（如前景人物、遠山、留白）
+        點選控制點並指定正確深度值，無須對全圖進行逐像素標注。
+        稀疏標注的核心假設是：對於領域專家（或熟悉畫作空間意圖的使用者），
+        辨識出「哪幾個點估算有誤」遠比「標注全圖」容易，
+        而這幾個控制點已足以引導模型重建出符合空間意圖的全域深度場。
+
+  \item \textbf{損失函數設計}：
+        控制點提供了局部的深度數值約束，
+        但若僅以逐點誤差優化，無法保證整體深度場的品質——
+        例如留白區域仍可能被賦予非零深度，
+        筆觸邊界兩側可能出現非自然的深度斷層，
+        或控制點間的相對前後順序被忽略。
+        本研究因此設計 \textit{ChinesePaintingLoss}，
+        結合筆觸感知平滑損失、留白正則化與拉普拉斯結構損失，
+        並輔以排序損失確保相對深度關係正確，
+        在 Marigold-DC 的去噪優化過程中將上述約束全數施加。
+\end{enumerate}
+
+三個步驟的設計邏輯環環相扣：
+初步估算提供觀察基礎，稀疏標注注入人類的空間意圖，損失函數確保優化結果的整體一致性。
+以下各節依序說明其具體實現。
 
 \subsection{初步深度估算}
+\label{subsec:rough}
 
-如第二章所述，監督式模型因 domain gap 無法直接套用於國畫，
-Depth Anything V3 雖具較強泛化能力但缺乏使用者干預介面，
-原始 Marigold 亦無法在推論階段接受外部約束。
-Marigold-DC \cite{marigolddc} 兼顧擴散先驗的零樣本泛化能力與稀疏深度引導機制，
-在訓練資料稀缺且需局部修正的國畫場景下最為適用，
-故本研究以其為深度估算骨幹。
+初步深度估算的目的僅在於提供使用者觀察深度分佈、判斷問題區域的參考依據，
+而非最終輸出，因此對速度的要求高於對精度的要求。
+本研究選用 Depth Anything V2 \cite{depthanythingv2} 作為初步估算模型。
 
-首先以無引導模式執行 Marigold-DC，
-取得初步深度圖 $D_{\mathrm{rough}}$，
-作為人工標注稀疏控制點前的觀察依據。
+DA-V2 為判別式模型，單次前向傳播即可完成推論，
+速度遠快於 Marigold-DC 等擴散式方法（後者通常需 50 步去噪迭代），
+能在互動式標注流程中即時呈現深度預覽。
+儘管速度優先，DA-V2 在大規模多樣化資料集上訓練所積累的豐富視覺先驗，
+已足以為使用者提供具參考價值的初步深度分佈。
+若改用 Marigold-DC 的無引導模式取代 DA-V2，
+不僅擴散採樣的迭代耗時不適合作為快速觀察參考，
+更因無引導結果與後續有控制點引導的精煉輸出同屬 Marigold-DC 的不同執行路徑，
+使用者將難以直觀判斷控制點標注帶來的深度改善幅度。
+
+本研究亦考慮以 Depth Anything V3 \cite{depthanything} 取代 DA-V2。
+然而如表~\ref{tab:da-comparison} 所示，
+DA-V3 相較 DA-V2 在單目相對深度上的改善主要體現於 ETH3D 資料集
+（$\delta_1$ 由 86.5 提升至 98.6，約 +12 個百分點），
+而在 KITTI、NYU、SINTEL、DIODE 等資料集上的差距則相當有限。
+ETH3D 為室內外真實場景的多視角幾何資料集，
+其場景特性與國畫的風格化二維空間表達存在根本性差距，
+此改善對國畫深度估算任務的遷移效益有限。
+
+\begin{table}[htbp]
+  \centering
+  \caption{單目深度估計比較（$\delta_1$ 精度，\%，越高越好；資料來源：\cite{depthanything} Table 4）}
+  \label{tab:da-comparison}
+  \begin{tabular}{lcccccc}
+    \hline
+    方法 & KITTI & NYU & SINTEL & ETH3D & DIODE & Rank \\
+    \hline
+    Depth Anything V2 & 94.6 & \textbf{97.9} & \textbf{77.2} & 86.5          & 95.2          & 2.60 \\
+    VGGT \cite{vggt}  & 91.7 & \textbf{97.9} & 67.9          & 97.5          & 95.3          & 3.75 \\
+    Depth Anything V3 & \textbf{95.3} & 97.4 & 75.5 & \textbf{98.6} & \textbf{95.4} & \textbf{2.20} \\
+    \hline
+    Teacher           & 97.2 & 97.9 & 81.4 & 99.8 & 96.6 & 1.00 \\
+    \hline
+  \end{tabular}
+\end{table}
+
+表中 Rank 為各方法在五個資料集上的綜合排名，越低越好；
+粗體數值表示各資料集上表現最佳的方法（Teacher 為 DA-V3 論文中的教師模型，作為上界參考，非公開發布）。
+
+究其根本，DA-V3 的核心改進來自多視角幾何理解——
+相機姿態估算、三維重建等任務驅動其學習真實三維場景的幾何結構，
+而國畫是以筆墨濃淡、留白虛實等藝術手法暗示空間層次，
+並非對真實三維場景的物理投影，
+此類多視角幾何先驗對國畫深度估算並無直接助益。
+就本研究所面對的場景而言，
+DA-V2 與 DA-V3 均缺乏對應的國畫訓練資料，
+面臨同等程度的 domain gap，DA-V3 的額外泛化能力無法在此帶來實質優勢。
+此外DA-V3 在本研究流程後段已承擔公制深度提供的職責
+（見第~\ref{sec:pointcloud}~節），
+將兩者角色明確分工，亦有助於保持流程各階段職責邊界的清晰度。
+
+本研究以 DA-V2 取得初步深度圖 $D_{\mathrm{rough}}$，
+呈現給使用者作為稀疏控制點標注前的觀察依據。
 
 \subsection{稀疏深度控制點標注}
+\label{subsec:dc}
 
 為修正 $D_{\mathrm{rough}}$ 中因國畫風格造成的估算偏差，
 本研究開發互動式標注工具。
@@ -35,6 +335,18 @@ Marigold-DC \cite{marigolddc} 兼顧擴散先驗的零樣本泛化能力與稀�
 其中 $\mathbf{M}_{i,j} = 1$ 代表該像素有使用者標注值。
 
 \subsection{損失函數設計}
+
+如第二章所述，監督式模型因 domain gap 無法直接套用於國畫，
+Depth Anything V3 雖具較強泛化能力但缺乏使用者干預介面，
+原始 Marigold 亦無法在推論階段接受外部約束。
+Marigold-DC \cite{marigolddc} 兼顧擴散先驗的零樣本泛化能力與稀疏深度引導機制，
+在訓練資料稀缺且需局部修正的國畫場景下最為適用，
+故本研究以其為稀疏引導深度估算的骨幹模型。
+在 Marigold-DC 中，條件輸入為輸入圖片的潛在編碼
+$\mathbf{z}^{(\mathbf{x})} = \mathcal{E}(\mathbf{x})$，
+U-Net 的去噪預測為
+$\hat{\boldsymbol{\epsilon}}_\theta(\mathbf{z}_t^{(\mathbf{d})}, \mathbf{z}^{(\mathbf{x})}, t)$，
+以圖像內容為引導，使深度估算結果與輸入圖片的視覺語意保持一致。
 
 取得稀疏控制點後，本研究以其為引導重新執行 Marigold-DC 的去噪優化。
 本研究設計的總損失由兩部分構成：
@@ -68,6 +380,9 @@ Marigold-DC \cite{marigolddc} 兼顧擴散先驗的零樣本泛化能力與稀�
     \bigl\| D_{\mathrm{pred}}[\mathbf{M}] - D_{\mathrm{sparse}}[\mathbf{M}] \bigr\|_2^2
 \end{equation}
 
+其中 $[\mathbf{M}]$ 表示以遮罩 $\mathbf{M}$ 選取所有 $\mathbf{M}_{i,j}=1$
+（即有使用者標注）位置的像素值，形成一維向量後計算損失。
+
 \paragraph{筆觸感知平滑損失（Brushstroke-aware Smoothness Loss）}
 
 國畫墨色筆觸的局部亮度梯度較大，
@@ -76,7 +391,7 @@ Marigold-DC \cite{marigolddc} 兼顧擴散先驗的零樣本泛化能力與稀�
 本研究引入最小連通性下界 $w_{\min}$，使平滑壓力永不為零：
 
 \begin{equation}
-  w_{i,j} = \max\!\Bigl( e^{-\alpha \|\nabla I\|_{i,j}},\; w_{\min} \Bigr)
+  w_{i,j} = \max\!\Bigl( e^{-\alpha \|\nabla I^{\mathrm{gray}}\|_{i,j}},\; w_{\min} \Bigr)
 \end{equation}
 
 \begin{equation}
@@ -88,8 +403,10 @@ Marigold-DC \cite{marigolddc} 兼顧擴散先驗的零樣本泛化能力與稀�
     \Bigr)
 \end{equation}
 
-其中 $\alpha = 1.0$、$w_{\min} = 0.2$，影像梯度 $\nabla I$ 以 Sobel 濾波器計算，
-並截斷至 $\|\nabla I\| \leq 2.0$ 以防止極端梯度值主導損失。
+其中 $\alpha = 1.0$、$w_{\min} = 0.2$，
+$I^{\mathrm{gray}} \in [0,1]$ 為歸一化灰度影像（與留白正則化節相同定義），
+影像梯度 $\nabla I^{\mathrm{gray}}$ 以 Sobel 濾波器計算，
+並截斷至 $\|\nabla I^{\mathrm{gray}}\| \leq 2.0$ 以防止極端梯度值主導損失。
 
 \paragraph{拉普拉斯結構損失（Laplacian Loss）}
 
@@ -119,7 +436,10 @@ Marigold-DC \cite{marigolddc} 兼顧擴散先驗的零樣本泛化能力與稀�
     \frac{1}{HW} \sum_{i,j} M^{\mathrm{white}}_{i,j} \cdot D_{\mathrm{pred},i,j}^{\,2}
 \end{equation}
 
-其中 $I^{\mathrm{gray}} \in [0,1]$ 為歸一化灰度值，$\tau = 0.85$ 為留白亮度閾值，$\sigma$ 為 sigmoid 函數。
+其中 $I^{\mathrm{gray}} \in [0,1]$ 為歸一化灰度值，$\tau = 0.85$ 為留白亮度閾值，
+$\sigma$ 為 sigmoid 函數，常數 $20$ 為陡峭度（sharpness）超參數，
+使 $M^{\mathrm{white}}_{i,j}$ 在 $I^{\mathrm{gray}}_{i,j} = \tau$ 附近形成接近階躍函數的銳利過渡，
+同時保留可微分性以支援反向傳播。
 
 \paragraph{排序損失（Ranking Loss）}
 
@@ -141,17 +461,36 @@ Marigold-DC \cite{marigolddc} 兼顧擴散先驗的零樣本泛化能力與稀�
 
 其中 $N$ 為控制點總數，$\delta = 0.1$ 為排序邊界（margin）。
 此損失確保深度的相對前後關係正確，避免出現前景點被估算為遠於背景的情形。
+所有損失收斂後，去噪過程輸出的最終深度預測記為精煉深度圖
+$D_{\mathrm{refined}} \in [0,1]^{H \times W}$，供後續反投影使用。
 
 \section{點雲生成與渲染}
+\label{sec:pointcloud}
 
-取得精煉深度圖 $D_{\mathrm{refined}}$ 後，
-本研究以 Depth Anything V3 \cite{depthanything} 所估算的公制深度為基礎，
-透過反投影（unprojection）將深度圖轉為帶有原圖色彩的三維點雲（point cloud）。
+Marigold-DC 輸出的 $D_{\mathrm{refined}}$ 為仿射不變（affine-invariant）的相對深度，
+與真實世界的公制深度（metric depth，單位為公尺）之間存在未知的縮放與平移關係，
+無法直接用於三維座標的計算。
+因此本研究另以 Depth Anything V3 \cite{depthanything} 對同一張圖片估算公制深度圖
+$D_{\mathrm{metric}}$，再以最小二乘法求解縮放係數 $s$ 與平移量 $b$，
+將 $D_{\mathrm{refined}}$ 對齊至公制尺度：
+
+\begin{equation}
+  D_{\mathrm{aligned}} = s \cdot D_{\mathrm{refined}} + b,
+  \quad
+  (s, b) = \arg\min_{s,b}
+    \bigl\| s \cdot D_{\mathrm{refined}}[\mathbf{M}'] + b - D_{\mathrm{metric}}[\mathbf{M}'] \bigr\|_2^2
+\end{equation}
+
+其中 $\mathbf{M}'$ 為非留白區域遮罩，排除留白像素以避免 DA-V3 在留白區的估算誤差干擾對齊結果。
+此步驟兼顧 Marigold-DC 的局部修正精度與 DA-V3 的公制深度估算能力。
+
+取得公制對齊深度圖 $D_{\mathrm{aligned}}$ 後，
+本研究透過反投影（unprojection）將其轉為帶有原圖色彩的三維點雲（point cloud）。
 給定相機內參矩陣 $\mathbf{K}$，每個像素 $(u, v)$ 對應的三維座標為：
 
 \begin{equation}
   \begin{pmatrix} X \\ Y \\ Z \end{pmatrix} =
-  D_{\mathrm{refined}}(u,v) \cdot \mathbf{K}^{-1}
+  D_{\mathrm{aligned}}(u,v) \cdot \mathbf{K}^{-1}
   \begin{pmatrix} u \\ v \\ 1 \end{pmatrix}
 \end{equation}
 
@@ -162,6 +501,7 @@ Marigold-DC \cite{marigolddc} 兼顧擴散先驗的零樣本泛化能力與稀�
 但為後續的視訊擴散模型提供了明確的空間幾何條件。
 
 \section{視訊擴散生成}
+\label{sec:video}
 
 本研究以點雲影片作為幾何引導條件，輸入 Uni3C \cite{uni3c} 的 PCDController。
 PCDController 將點雲渲染影格編碼為幾何引導訊號，
