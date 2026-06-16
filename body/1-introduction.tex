@@ -24,7 +24,10 @@
 在有限的資料條件下更容易取得具說服力的視覺成果。
 若能將此技術應用於國畫，將可使傳統藝術以更吸引人的方式呈現，讓觀看者更能夠有身臨其境的感受。
 已有研究如 ViewCrafter \cite{viewcrafter} 探索以擴散模型從單張圖片合成具有視差感的動態影片，
-顯示此方向的可行性。
+在真實場景照片上展現了良好的視覺成果，顯示此方向的可行性。
+然而 ViewCrafter 以真實照片作為主要訓練資料，
+在處裡國畫特有的留白構圖、抽象筆觸與缺乏立體線索等特性時，
+容易產生不自然的深度判斷與影像扭曲，難以直接套用。
 
 \begin{figure}[htbp]
   \centering
@@ -32,6 +35,7 @@
   \hfill
   \includegraphics[height=5.5cm]{sparse_depth_hints}
   \caption{（左）輸入國畫原圖；（右）稀疏深度控制點標注介面：
+  使用者可於圖片上任意點選數量不限的控制點，
   標注點以紅色方框標示座標與初估深度值（$D_{\mathrm{rough}}$），
   右側滑桿可調整各控制點的深度值（0 為最遠，1 為最近）。
   在無引導的情況下，擴散模型的深度估算存在明顯錯誤：
@@ -64,7 +68,7 @@
 為了解決上述問題，本研究引入 Marigold-DC \cite{marigolddc}，
 此方法允許使用者提供少量的稀疏深度控制點（sparse depth hints，如圖~\ref{fig:sparse_depth_hints}）來引導模型的估算結果，
 無須對全圖進行完整標注，大幅降低人工成本。
-此外原始 Marigold-DC 的損失函數（loss function）僅衡量幾何準確性。
+此外原始 Marigold-DC 的損失函數（loss function）僅衡量幾何準確性（geometric accuracy）。
 本研究考慮國畫特有的筆觸結構與留白語意，
 對其損失函數進行改良，
 設計了專為國畫特性量身打造的 \textit{ChinesePaintingLoss}（詳見第三章第~3-2 節），

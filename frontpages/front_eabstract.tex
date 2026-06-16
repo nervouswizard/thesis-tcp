@@ -6,9 +6,9 @@ To address this, we incorporate Marigold-DC, enabling users to guide depth estim
 sparse depth control points, and design \textit{ChinesePaintingLoss}, a composite loss function
 tailored to Chinese painting characteristics, comprising brushstroke-aware smoothness loss,
 Laplacian loss, whitespace regularization, and a ranking loss.
-The refined depth map is then unprojected into a colored 3D point cloud using metric depth
+The refined depth map is then unprojected into a colored 3D point cloud using depth
 estimated by Depth Anything V3, rasterized along a predefined camera trajectory to produce a
-parallax-rich point cloud video, and finally fed into Uni3C's PCDController, where a video
+preliminary parallax-rich point cloud video, and finally fed into Uni3C's PCDController, where a video
 diffusion model fills occlusion holes while preserving the painterly style, yielding a smooth,
 complete 2.5D animated video.
 
