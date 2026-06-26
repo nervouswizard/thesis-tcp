@@ -243,23 +243,22 @@ Marigold 無須重新設計編解碼器，可直接沿用預訓練的 Stable Dif
         使用者依據初步深度圖，僅需在少數關鍵位置（如前景人物、遠山、留白）
         點選控制點並指定正確深度值，無須對全圖進行逐像素標注。
         稀疏標注的核心假設是：對於領域專家（或熟悉畫作空間意圖的使用者），
-        辨識出「哪幾個點估算有誤」遠比「標注全圖」容易，
+        辨識出「哪些區域估算有誤」遠比「標注全圖」容易，
         而這幾個控制點已足以引導模型重建出符合空間意圖的全域深度場。
 
-  \item \textbf{損失函數設計}：
+  \item \textbf{以國畫感知損失函數精煉深度場}：
         控制點提供了局部的深度數值約束，
         但若僅以逐點誤差優化，無法保證整體深度場的品質——
         例如留白區域仍可能被賦予非零深度，
-        筆觸邊界兩側可能出現非自然的深度斷層，
-        或控制點間的相對前後順序被忽略。
-        本研究因此設計 \textit{ChinesePaintingLoss}，
-        結合筆觸感知平滑損失、留白正則化與拉普拉斯結構損失，
-        並輔以排序損失確保相對深度關係正確，
-        在 Marigold-DC 的去噪優化過程中將上述約束全數施加。
+        筆觸邊界兩側可能出現非自然的深度斷層。
+        本研究提出 \textit{ChinesePaintingLoss}，
+        結合筆觸感知平滑損失與留白正則化，
+        在 Marigold-DC 的去噪優化過程中施加上述約束，
+        從而取得符合國畫空間語意的精煉深度圖 $D_{\mathrm{refined}}$。
 \end{enumerate}
 
 三個步驟的設計邏輯環環相扣：
-初步估算提供觀察基礎，稀疏標注注入人類的空間意圖，損失函數確保優化結果的整體一致性。
+初步估算提供觀察基礎，稀疏標注注入人類的空間意圖，國畫感知損失函數確保優化結果的整體一致性。
 以下各節依序說明其具體實現。
 
 \subsection{初步深度估算}
@@ -279,7 +278,7 @@ DA-V2 為判別式模型，單次前向傳播即可完成推論，
 更因無引導結果與後續有控制點引導的精煉輸出同屬 Marigold-DC 的不同執行路徑，
 使用者將難以直觀判斷控制點標注帶來的深度改善幅度。
 
-本研究亦考慮以 Depth Anything V3 \cite{depthanything} 取代 DA-V2。
+本研究亦考慮以 Depth Anything V3 \cite{depthanything}（下稱 DA-V3）取代 DA-V2。
 然而如表~\ref{tab:da-comparison} 所示，
 DA-V3 相較 DA-V2 在單目相對深度上的改善主要體現於 ETH3D 資料集
 （$\delta_1$ 由 86.5 提升至 98.6，約 +12 個百分點），
@@ -347,12 +346,13 @@ $D_{\mathrm{sparse}}$ 在對應位置儲存該控制點的指定深度
 如第二章所述，監督式模型因 domain gap 無法直接套用於國畫，
 Depth Anything V3 雖具較強泛化能力但缺乏使用者干預介面，
 原始 Marigold 亦無法在推論階段接受外部約束。
-Marigold-DC \cite{marigolddc} 透過擴散模型的豐富先驗視覺知識零樣本泛化能力（zero-shot generalization），
-並且可以透過稀疏深度來引導深度圖的機制，
-在訓練資料稀缺且需局部修正的國畫場景下最為適用，
-故本研究以其做為稀疏引導深度估算的模型。
+Marigold-DC \cite{marigolddc} 兼具擴散模型的豐富視覺先驗與零樣本泛化能力（zero-shot generalization），
+同時支援以稀疏深度控制點引導深度估算，
+在訓練資料稀缺且需要局部修正的國畫場景下尤為適用，
+故本研究以其作為稀疏引導深度估算的模型。
 Marigold-DC 在 Marigold 的 DDIM 去噪框架之上，
-引入了一條基於稀疏控制點的梯度反饋路徑作為核心改進。
+引入了一條基於稀疏控制點的梯度反饋路徑作為核心改進，
+整體引導流程如圖~\ref{fig:marigolddc} 所示。
 在每個去噪步驟 $t$ 結束後，
 Marigold-DC 以 Tweedie 公式 \cite{tweedie} 估算乾淨深度潛在向量。
 Tweedie 公式源自貝葉斯統計，給定含噪觀測值，
@@ -373,6 +373,19 @@ Tweedie 公式源自貝葉斯統計，給定含噪觀測值，
 
 其中 $\bar{\alpha}_t$ 為 DDPM 前向過程的累積雜訊係數，
 $\hat{\boldsymbol{\epsilon}}_\theta$ 為 U-Net 對當前時步所預測的雜訊。
+之所以可以一步從 $t$ 直接推算 $\hat{\mathbf{z}}_0^{(\mathbf{d})}$，
+關鍵在於 DDPM 的前向加噪過程是封閉式（closed-form）的：
+
+\begin{equation}
+  \mathbf{z}_t = \sqrt{\bar{\alpha}_t}\,\mathbf{z}_0 + \sqrt{1 - \bar{\alpha}_t}\,\boldsymbol{\epsilon},
+  \quad \boldsymbol{\epsilon} \sim \mathcal{N}(\mathbf{0}, \mathbf{I})
+\end{equation}
+
+即任意時步 $t$ 的含噪向量可由乾淨向量 $\mathbf{z}_0$ 與一個雜訊樣本以代數方式表示，
+兩者之間不存在逐步迭代的依賴關係。
+因此只要 U-Net 能對 $\mathbf{z}_t$ 所含的累積雜訊 $\boldsymbol{\epsilon}$ 給出準確預測
+$\hat{\boldsymbol{\epsilon}}_\theta$，便可直接代數求解出 $\hat{\mathbf{z}}_0^{(\mathbf{d})}$，
+無需逐步從 $t$ 走回 $t{-}1, t{-}2, \ldots, 0$。
 此公式利用 U-Net 的雜訊預測，將含噪潛在向量 $\mathbf{z}_t^{(\mathbf{d})}$ 投影回乾淨潛在空間，
 得到去噪後的估算值 $\hat{\mathbf{z}}_0^{(\mathbf{d})}$，
 再經 VAE 解碼器 $\mathcal{D}(\cdot)$ 轉換為當前時步的深度預測中間值：
@@ -382,7 +395,6 @@ $\hat{\mathbf{d}}_t^{(m)} = \mathcal{D}(\hat{\mathbf{z}}_0^{(\mathbf{d})})$，
 在進入下一去噪步驟前先將潛在向量沿控制點約束的方向修正。
 如此逐步驟地施加幾何約束，使最終生成的深度場在不重新訓練模型的前提下，
 逐漸收斂至與使用者標注相符的結果。
-整體引導流程如圖~\ref{fig:marigolddc} 所示。
 
 \begin{figure}[htbp]
   \centering
@@ -390,7 +402,8 @@ $\hat{\mathbf{d}}_t^{(m)} = \mathcal{D}(\hat{\mathbf{z}}_0^{(\mathbf{d})})$，
   \caption{Marigold-DC 引導推論流程。
   上半部：推論路徑，RGB 圖像 $\mathbf{x}$ 經潛在編碼器得 $\mathbf{z}^{(\mathbf{x})}$，
   深度潛在向量 $\mathbf{z}_t^{(\mathbf{d})}$ 與其拼接後送入 U-Net 去噪，
-  最終解碼為深度圖 $\hat{\mathbf{d}}^{(m)}$。
+  完成所有去噪步驟後得到乾淨潛在特徵 $\mathbf{z}_0^{(\mathbf{d})}$，
+  再經 VAE 解碼器 $\mathcal{D}(\cdot)$ 解碼為仿射不變深度圖 $\hat{\mathbf{d}}^{(m)}$。
   下半部：稀疏引導路徑，每個去噪步驟中以 Tweedie 公式預估當前深度中間值
   $\hat{\mathbf{d}}_t^{(m)}$，計算其與稀疏控制點 $\mathbf{c}$ 之損失 $\mathcal{L}$，
   並反向傳播至潛在向量以施加幾何約束。
@@ -437,9 +450,11 @@ L1 損失不易被少數偏差極大的控制點主導，L2 損失則對微小�
 在筆觸兩側產生不自然的深度斷裂，
 為了解決這個問題，我們引入了筆觸感知平滑損失（Brushstroke-aware Smoothness Loss）。
 
-\paragraph{筆觸感知平滑損失（Brushstroke-aware Smoothness Loss）} 
+\paragraph{筆觸感知平滑損失（Brushstroke-aware Smoothness Loss）}
 
-傳統影像引導平滑損失 \cite{monodepth} 以影像梯度大小作為邊緣權重的指數衰減：
+本研究提出的筆觸感知平滑損失是針對國畫特性的原創設計，
+以傳統影像引導平滑損失 \cite{monodepth} 為基礎加以改進。
+傳統方法以影像梯度大小作為邊緣權重的指數衰減：
 梯度大（筆觸邊界）處權重趨近於零，允許深度不連續；
 梯度小（均勻區域）處權重趨近於一，施加強力平滑。
 然而國畫的墨色筆觸濃重，其亮度梯度與真實物體邊界的梯度難以區分，
@@ -456,8 +471,8 @@ L1 損失不易被少數偏差極大的控制點主導，L2 損失則對微小�
   （d）在（c）基礎上加入筆觸感知平滑損失 $\mathcal{L}_{\mathrm{brush}}$；
   （e）在（d）基礎上進一步加入留白正則化 $\mathcal{L}_{\mathrm{white}}$，
   即完整的 \textit{ChinesePaintingLoss}。
-  由（c）至（d）可見筆觸處的深度斷裂現象獲得緩解；
-  由（d）至（e）可見留白區域的深度被正確壓低至遠景範圍。}
+  由（c）至（d）可見筆觸處的深度斷裂現象獲得緩解，整體深度較爲平滑；
+  由（d）至（e）可見留白區域（紅色區域）的深度被正確壓低至遠景範圍。}
   \label{fig:loss_comparison}
 \end{figure}
 
@@ -472,7 +487,7 @@ L1 損失不易被少數偏差極大的控制點主導，L2 損失則對微小�
 在筆觸邊界（$\|\nabla I^{\mathrm{gray}}\|$ 大）時衰減至接近 0，
 而 $w_{\min} = 0.2$ 作為下界，保證該處仍保留 20\% 的平滑壓力，
 防止深度圖因筆觸而產生非物理的硬性斷層。
-完整的筆觸平滑損失為：
+本研究提出的完整的筆觸平滑損失為：
 
 \begin{equation}
   \mathcal{L}_{\mathrm{brush}} =
@@ -501,7 +516,7 @@ $I^{\mathrm{gray}} \in [0,1]$ 為歸一化灰度影像，以標準亮度加權�
 而在國畫的視覺語言中，留白代表遙遠的天際或虛空，深度應趨近最遠端。
 由於本研究設計的 $\mathcal{L}_{\mathrm{brush}}$ 僅約束高梯度區域的空間平滑性，
 對留白區域的絕對深度值沒有語意層面的限制，
-因此需要針對留白語意另行設計正則化項。
+因此本研究針對留白語意另行設計正則化項。
 
 \paragraph{留白正則化（Whitespace Regularization）}
 
@@ -519,17 +534,26 @@ $I^{\mathrm{gray}} \in [0,1]$ 為歸一化灰度影像，以標準亮度加權�
 本研究的做法分兩步：
 
 \textbf{步驟一：偵測留白。}
-以 sigmoid 函數對每個像素的灰度值 $I^{\mathrm{gray}}_{i,j}$
+Sigmoid 函數定義為：
+\begin{equation}
+  \sigma(x) = \frac{1}{1 + e^{-x}}
+\end{equation}
+其輸出值域為 $(0, 1)$，可將任意實數映射為連續的機率值。
+以此對每個像素的灰度值 $I^{\mathrm{gray}}_{i,j}$
 計算連續的留白機率 $M^{\mathrm{white}}_{i,j}$：
 
 \begin{equation}
   M^{\mathrm{white}}_{i,j} = \sigma\!\bigl((I^{\mathrm{gray}}_{i,j} - \tau) \cdot 20\bigr)
 \end{equation}
 
-其中 $\tau = 0.85$ 為留白亮度閾值，常數 $20$ 控制過渡的陡峭程度。
+其中 $\tau = 0.85$ 為留白亮度閾值，常數 $20$ 控制過渡的陡峭（steepness）程度。
 當灰度值明顯高於 $\tau$（接近純白）時 $M^{\mathrm{white}}_{i,j} \to 1$，判定為留白；
 當灰度值低於 $\tau$（有墨色）時 $M^{\mathrm{white}}_{i,j} \to 0$，不施加約束。
-使用 sigmoid 而非硬性閾值，是為了保持可微分性以支援反向傳播。
+使用 sigmoid 而非硬性閾值（如 $\mathbf{1}[I^{\mathrm{gray}} > \tau]$），
+是因為硬性閾值在 $\tau$ 處的梯度為零或未定義，
+損失函數對像素亮度的變化量將無從計算，梯度下降（gradient descent）無法更新模型參數。
+Sigmoid 在任意輸入值下均可微，確保損失函數的梯度能夠在反向傳播（backpropagation）
+過程中完整地從懲罰項傳遞至深度預測，使模型得以透過優化逐步將留白區域的深度值推向遠景。
 
 \textbf{步驟二：懲罰留白處的深度偏差。}
 以 $M^{\mathrm{white}}_{i,j}$ 為權重，
@@ -542,7 +566,7 @@ $I^{\mathrm{gray}} \in [0,1]$ 為歸一化灰度影像，以標準亮度加權�
 
 若模型正確將留白預測為遠景（$D_{\mathrm{pred}} \approx 0$），損失貢獻接近零；
 若誤判為前景（$D_{\mathrm{pred}} \approx 1$），損失平方放大，施以強力懲罰。
-如圖~\ref{fig:loss_comparison}（e）所示，加入此項後留白區域的深度明顯壓低。
+如圖~\ref{fig:loss_comparison}（e）所示，加入此項後留白區域（紅色框內）的深度明顯壓低。
 
 各損失分項的權重係數設定為：
 $\lambda_m = \dfrac{2}{3}$，$\lambda_b = \dfrac{1}{6}$，$\lambda_w = \dfrac{1}{6}$。
@@ -553,36 +577,57 @@ $D_{\mathrm{refined}} \in [0,1]^{H \times W}$，供後續反投影使用。
 \section{點雲生成與渲染}
 \label{sec:pointcloud}
 
-Marigold-DC 輸出的 $D_{\mathrm{refined}}$ 為仿射不變（affine-invariant）的相對深度，
-與真實世界的真實深度（metric depth，單位為公尺）之間存在未知的縮放與平移關係，
-無法直接用於三維座標的計算；
-此外反投影（unprojection）亦需要相機內參矩陣（intrinsics），而 Marigold-DC 不輸出此資訊。
+本節的點雲重建以單張國畫所對應的精煉深度圖 $D_{\mathrm{refined}}$ 為唯一輸入來源，
+透過單視角反投影（single-view unprojection）將其轉為三維點雲，
+不涉及多視角幾何重建或三維模型構建。
 
-本研究將 $D_{\mathrm{refined}}$ 轉存為灰階視覺化圖，作為 Depth Anything V3 \cite{depthanything} 的輸入，
-架構圖如~\ref{fig:da3pipeline}。
-DA-V3 以大規模多樣化資料監督訓練，能從輸入影像的亮暗分布中直接推算真實深度，
-並同時輸出對應的相機內參矩陣 $\mathbf{K}$。
-由於灰階深度圖的明暗梯度保留了 Marigold-DC 精煉後的空間深度結構，
-DA-V3 對其進行推論所得的真實深度圖 $D_{\mathrm{metric}}$ 亦繼承了此結構，
-同時具備真實尺度，可直接用於三維反投影。
+直觀上，若已取得深度圖 $D$ 與相機內參矩陣 $\mathbf{K}$：
+
+\begin{equation}
+  \mathbf{K} =
+  \begin{pmatrix} f_x & 0 & c_x \\ 0 & f_y & c_y \\ 0 & 0 & 1 \end{pmatrix}
+\end{equation}
+
+其中 $f_x, f_y$ 為焦距（focal length），$(c_x, c_y)$ 為主點坐標（principal point）。
+即可對每個像素 $(u,v)$ 直接反投影至三維空間：
+
+\begin{equation}
+  \begin{pmatrix} X \\ Y \\ Z \end{pmatrix} =
+  D(u,v) \cdot \mathbf{K}^{-1}
+  \begin{pmatrix} u \\ v \\ 1 \end{pmatrix}
+\end{equation}
+
+然而 $D_{\mathrm{refined}}$ 存在兩項根本限制，使其無法直接作為此公式的輸入：
+
+\begin{enumerate}
+  \item \textbf{缺乏公制尺度}：$D_{\mathrm{refined}}$ 為仿射不變（affine-invariant）的相對深度，
+        值域為 $[0,1]$，並非以公尺為單位的真實深度。
+        以相對深度反投影所得的點雲幾何形狀雖正確，但絕對尺度未知，
+        無法與真實攝影機軌跡對應，渲染時視差感失真。
+  \item \textbf{缺乏相機內參}：$\mathbf{K}^{-1}$ 將像素坐標 $(u,v)$ 還原為相機坐標系的方向向量，
+        是計算三維坐標的必要條件。
+        Marigold-DC 以擴散去噪為推論機制，不估算相機幾何參數，無法輸出 $\mathbf{K}$。
+\end{enumerate}
+
+因此本研究引入 Depth Anything V3 \cite{depthanything}（架構如圖~\ref{fig:da3pipeline}）
+來解決上述兩項限制，取得準確的三維點雲。
+DA-V3 以大規模多樣化資料進行監督訓練，能直接從輸入影像估算公制深度，
+並在內部估算相機內參矩陣 $\mathbf{K}$；
+其 DA3\_ToPointCloud 模組將兩者合併運算，直接輸出三維點雲，
+在點雲生成階段使用者無需手動提取或傳遞 $\mathbf{K}$。
+本研究以 $D_{\mathrm{refined}}$ 的灰階視覺化圖作為 DA-V3 的輸入，
+令其在保留 Marigold-DC 精煉後空間結構的前提下，
+直接輸出帶有公制尺度的三維點雲，供後續 Uni3C 渲染使用。
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=0.9\linewidth]{da3_pipeline.png}
-  \caption{Depth Anything V3 架構示意圖。輸入影像經 Image Patch Embed 後進入以 Vanilla DINO 為骨幹的 Single Transformer，再透過 Dual-DPT Head 同時輸出真實深度圖（Depth）、射線方向（Ray）與三維點座標（Points），並可選擇性地加入相機內參 token（Camera）以提升估算精度。本研究以 Marigold-DC 精煉後的灰階深度視覺化圖作為輸入，借助 DA-V3 的公制推論能力取得 $D_{\mathrm{metric}}$ 與相機內參矩陣 $\mathbf{K}$，作為後續點雲反投影的基礎。}
+  \caption{Depth Anything V3 架構示意圖。輸入影像經 Image Patch Embed 後進入以 Vanilla DINOv2 \cite{dinov2} 為骨幹的 Single Transformer，再透過 Dual-DPT Head 同時輸出真實深度圖（Depth）、射線方向（Ray）與三維點座標（Points），並可選擇性地加入相機內參 token（Camera）以提升估算精度。}
   \label{fig:da3pipeline}
 \end{figure}
 
-本研究透過反投影將 $D_{\mathrm{metric}}$ 轉為帶有原圖色彩的三維點雲（point cloud）。
-給定相機內參矩陣 $\mathbf{K}$，每個像素 $(u, v)$ 對應的三維座標為：
-
-\begin{equation}
-  \begin{pmatrix} X \\ Y \\ Z \end{pmatrix} =
-  D_{\mathrm{metric}}(u,v) \cdot \mathbf{K}^{-1}
-  \begin{pmatrix} u \\ v \\ 1 \end{pmatrix}
-\end{equation}
-
-點雲在三維空間中明確記錄每個點的幾何位置，
+所輸出的點雲以原始輸入國畫圖片的像素色彩著色，
+在三維空間中同時記錄每個點的幾何位置與色彩資訊，
 可沿著預設的攝影機軌跡進行標準圖形學光柵化渲染（rasterization），
 產生一段帶有真實視差感的初步 2.5D 點雲影片。
 渲染結果含有因視角偏移而露出的遮擋破洞（holes），
@@ -594,7 +639,7 @@ DA-V3 對其進行推論所得的真實深度圖 $D_{\mathrm{metric}}$ 亦繼承
 點雲渲染雖能提供正確的視差感，但仍存在兩項根本限制。
 一是當攝影機平移或旋轉時，原本被前景遮擋的背景區域會逐漸露出，
 而這些區域在點雲中並無對應的幾何資料，渲染結果出現空洞。
-二是光柵化渲染僅能將離散的點投影至畫面，
+二是光柵化渲染（rasterization）僅能將離散的點投影至畫面，
 無法重現國畫中筆墨的紋理細節與留白的空間意境，
 直接輸出的畫面缺乏視覺品質。
 若以傳統插值或影像修補（inpainting）補全空洞，
@@ -605,20 +650,74 @@ DA-V3 對其進行推論所得的真實深度圖 $D_{\mathrm{metric}}$ 亦繼承
 生成在語意與風格上與周圍畫面一致的內容；
 其二是在整段影片的時序維度上維持視覺一致性，
 避免逐幀獨立修補所造成的閃爍問題。
-但均以真實場景影像為主要訓練資料純粹的視訊擴散模型缺乏三維幾何約束，
+然而以真實場景影像為主要訓練資料的純視訊擴散模型缺乏三維幾何約束，
 生成的攝影機運動難以與預設軌跡精確對應，
 容易在視角切換時產生幾何不一致的幻覺（hallucination）。
 
-本研究以點雲影片作為幾何引導條件，輸入 Uni3C \cite{uni3c} 的 PCDController。
-PCDController 將點雲渲染影格編碼為幾何引導訊號，
-驅動視訊擴散模型在去噪過程中嚴格遵守三維幾何約束：
-一方面以擴散模型的生成能力填補遮擋破洞，
-另一方面藉助 Uni3C 的風格一致性機制維持國畫的整體視覺風格，
-最終輸出流暢完整且具真實視差感的 2.5D 動態影片。
+因此本研究引入 Uni3C \cite{uni3c}，
+以點雲作為幾何引導條件來驅動視訊擴散模型生成 2.5D 動態影片。
+Uni3C 原始設計以 Depth-Pro \cite{depthpro} 對參考影像進行單目深度估算，
+取得公制深度後反投影生成點雲，再依預設攝影機軌跡光柵化（rasterization）渲染為逐幀影片 $V_{\mathrm{pcd}}$。
+然而如第~\ref{sec:depth} 節所述，Depth-Pro 在國畫領域難以取得可靠的深度估算，
+本研究因此對此流程加以修改：
+點雲已由前述 Marigold-DC 與 DA-V3 的 pipeline 預先生成，
+故 Depth-Pro 的深度估算結果不再用於點雲重建，
+而僅保留其對參考影像所估算的焦距 $f_{\mathrm{px}}$，
+用以建構渲染所需的相機內參矩陣
+\begin{equation}
+\mathbf{K} = \begin{pmatrix} f_{\mathrm{px}} & 0 & w/2 \\ 0 & f_{\mathrm{px}} & h/2 \\ 0 & 0 & 1 \end{pmatrix}
+\end{equation}
+其中 $w$、$h$ 分別為影像寬度與高度。
+相機與點雲的初始距離 $r$ 則根據相似三角形原理，
+由點雲的三維高度 $H_{\mathrm{pcd}}$、焦距 $f_{\mathrm{px}}$ 與影像高度 $h$ 反推：
+\begin{equation}
+r = \frac{H_{\mathrm{pcd}} \cdot f_{\mathrm{px}}}{h}
+\label{eq:camera_dist}
+\end{equation}
+確保點雲投影結果恰好填滿第一幀畫面。
+然而此距離有時會使相機距點雲過遠，導致背景區域會有過大的空洞區域，
+影響後續擴散模型的填補品質。
+因此本研究在必要時手動縮短相機距離（即調整 $r$ 的縮放係數），
+使相機更貼近點雲整體，以壓縮空洞的面積，提升最終影片的生成品質。
+$V_{\mathrm{pcd}}$ 的第一幀設定為原始輸入國畫圖片（$V_{\mathrm{pcd}}^1 = I_{\mathrm{img}}$），
+以錨定生成影片的視覺外觀。
+
+PCDController 接著將 $V_{\mathrm{pcd}}$ 透過 Wan2.1 \cite{wan2025} 的 3D-VAE 編碼成淺在空間的點（Point Latent，$c_{\mathrm{pcd}}$）作為外觀引導訊號，
+並以六通道 Plücker Ray Embedding \cite{dmv3d} 編碼各像素的三維射線位置與方向，
+作為幾何引導訊號。
+兩類訊號透過零初始化線性層（zero-initialized linear layers）投影後，
+以 Element-wise Addition 的方式注入 Wan-I2V 前 20 層的去噪過程，
+如圖~\ref{fig:uni3cpipeline} 所示。
+
+空洞問題的解決機制如下：
+對於有點雲資料對應的像素，幾何引導訊號強力約束其生成結果，
+確保輸出與點雲渲染的三維幾何一致；
+對於因視角偏移而露出的空洞像素，點雲中無對應幾何資料，
+此時 Wan-DiT 依賴第一幀的外觀特徵（Image CLIP + Wan-Encoder）
+與文字提示的語意引導，以習得的視覺先驗填補空洞，
+生成在風格與語意上與周圍影格一致的內容，
+而非傳統影像修補（inpainting）在缺乏語意理解下所產生的不自然結果。
+
+本研究在未修改 Uni3C 主體架構的前提下，
+針對國畫動態生成的特性，對底層 Wan2.1 I2V 模型的文字提示進行專屬設計。
+正向提示設定為：
+\begin{quote}
+\textit{``This video describes a slow and stable camera movement with a static 3D object.''}
+\end{quote}
+負向提示設定為：
+\begin{quote}
+\textit{``object movement''}
+\end{quote}
+正向提示引導模型將場景理解為攝影機運動而非物體運動，
+確保填補空洞時所生成的內容符合視角切換下靜態場景的語意預期；
+負向提示則明確壓制物體運動訊號的生成，
+防止模型在填補遮擋區域時引入不符合國畫語意的物體位移幻覺（hallucination），
+從而維持畫中人物與景物的靜態性。
+最終 Uni3C 輸出流暢完整且具真實視差感的 2.5D 動態影片。
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=0.95\linewidth]{uni3c_pipeline.png}
-  \caption{Uni3C 視訊生成架構示意圖。點雲經光柵化渲染後，以 Pinhole Ray 與 Point Latent 的形式輸入 PCDController，提供逐幀的三維幾何引導條件。第一幀影像透過 Image CLIP 與 Wan-Encoder 提取視覺特徵，連同文字提示一同注入視訊擴散模型（Wan-DiT）的去噪過程。PCDController 以 Element-wise Addition 與 Stitching/Concatenation 方式將幾何訊號融合進各去噪時間步，確保生成影片的攝影機軌跡與點雲渲染結果一致，最終由 Wan-Decoder 解碼輸出完整的 2.5D 動態影片。}
+  \caption{Uni3C 視訊生成架構示意圖。點雲渲染影片經 Wan2.1 的 3D-VAE 編碼為 Point Latent（$c_{\mathrm{pcd}}$），並以六通道 Plücker Ray Embedding 編碼各像素的三維位置與射線方向，作為 PCDController 的兩類引導訊號。第一幀影像透過 Image CLIP 與 Wan-Encoder 提取視覺特徵，連同文字提示一同注入視訊擴散模型（Wan-DiT）的去噪過程。PCDController 透過零初始化線性層投影後，以 Element-wise Addition 的方式將幾何訊號注入 Wan-I2V 前 20 層的去噪過程，確保生成影片的攝影機軌跡與點雲渲染結果一致，最終由 Wan-Decoder 解碼輸出完整的 2.5D 動態影片。}
   \label{fig:uni3cpipeline}
 \end{figure}

@@ -86,6 +86,14 @@ Depth Anything V3 \cite{depthanything} 以大規模多樣化資料訓練，
 對多種影像風格具有較強的適應性。
 但與監督式方法相同，其架構不提供稀疏深度引導介面，
 在推論階段無法接受使用者指定的局部深度修正。
+其架構如圖~\ref{fig:da3rw}~所示。
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.85\linewidth]{da3_pipeline.png}
+  \caption{Depth Anything V3 架構圖（出自 \cite{depthanything}）。Single Transformer 以 Vanilla DINO 為骨幹，經 Dual-DPT Head 同時輸出公制深度圖（Depth）、射線方向（Ray）及三維點座標（Points），並可選擇性加入相機內參 token 以提升精度。}
+  \label{fig:da3rw}
+\end{figure}
 
 Marigold-DC \cite{marigolddc} 在 Marigold 基礎上引入稀疏深度引導機制（sparse depth completion）。
 使用者僅需提供少量像素位置的深度數值作為控制點，
@@ -98,6 +106,14 @@ Marigold-DC \cite{marigolddc} 在 Marigold 基礎上引入稀疏深度引導機�
 直接套用於國畫深度估算時容易產生不符畫意的深度分布。
 此外如何有系統地引導使用者決定控制點的位置與深度數值，亦是實際應用的重要課題。
 本研究針對上述問題提出改進方案，控制點標注流程詳見第~\ref{subsec:dc}~節，損失函數設計詳見第~\ref{subsec:loss}~節。
+Marigold-DC 的稀疏引導流程如圖~\ref{fig:marigolddcrw}~所示。
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.85\linewidth]{marigoldDC_pipeline.png}
+  \caption{Marigold-DC 稀疏深度引導流程（出自 \cite{marigolddc}）。在每個 DDIM 去噪步驟中，以 Tweedie 公式估算當前潛在乾淨樣本，經 VAE 解碼後與稀疏控制點計算損失並反向傳播，將深度生成過程引導至符合使用者指定控制點的方向。}
+  \label{fig:marigolddcrw}
+\end{figure}
 
 \section{單張圖像的三維場景重建與生成}
 
@@ -157,6 +173,14 @@ Uni3C \cite{uni3c} 提出統一的三維強化控制框架，
 在去噪過程中施加嚴格的幾何約束，確保生成影片的視角移動與輸入軌跡一致。
 本研究採用 Uni3C 的 PCDController 作為最終視訊生成模組，
 以點雲影片引導視訊擴散模型填補遮擋空洞並維持國畫整體風格。
+Uni3C 的整體架構如圖~\ref{fig:uni3crw}~所示。
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.9\linewidth]{uni3c_pipeline.png}
+  \caption{Uni3C 視訊生成架構圖（出自 \cite{uni3c}）。點雲經渲染後以 PCDController 提供幾何引導，結合第一幀影像特徵與文字提示，透過 Wan-DiT 完成時序一致的視訊去噪，最終由 Wan-Decoder 輸出 2.5D 動態影片。}
+  \label{fig:uni3crw}
+\end{figure}
 
 上述方法雖然在點雲引導視訊生成領域取得重要進展，
 但均以真實場景影像為主要訓練資料，對國畫的特殊視覺特性缺乏針對性設計。

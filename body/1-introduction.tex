@@ -77,7 +77,13 @@
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\textwidth]{pipeline}
-  \caption{本研究提出之國畫 2.5D 影片生成流程：以單張國畫為輸入，依序經過深度估算、稀疏深度控制點引導、點雲反投影渲染，最終由視訊擴散模型生成 2.5D 動態影片。}
+  \caption{本研究提出之國畫 2.5D 影片生成流程。
+  以單張國畫 Input image 為輸入，首先透過深度估算（Depth Estimate）取得初步深度圖 $D_{\mathrm{rough}}$；
+  使用者依據 $D_{\mathrm{rough}}$ 標注（Manual adjustiment）稀疏深度控制點 $G$，
+  作為改進後的 Marigold-DC 的引導條件，輸出精煉深度圖 $D_{\mathrm{refined}}$；
+  $D_{\mathrm{refined}}$ 再透過 Depth Anything V3 反投影為三維點雲（Point Cloud，$\mathit{PCD}$）；
+  最終以 Uni3C 沿預設攝影機軌跡渲染點雲影片 $V_{\mathit{pcd}}$，
+  並驅動視訊擴散模型生成流暢的 2.5D 動態影片。}
   \label{fig:pipeline}
 \end{figure}
 
@@ -106,6 +112,10 @@
 讓使用者只需提供一張國畫圖片，搭配少量的人工深度標注，
 即可自動產生具有景深感的 2.5D 動態影片，使傳統國畫得以動態形式呈現。
 整體流程如圖~\ref{fig:pipeline} 所示。
+
+值得一提的是，本研究並非純粹的自動化黑盒系統，而是在流程的多個層次提供使用者控制介面：
+使用者可透過稀疏深度控制點干預空間語意、透過攝影機軌跡參數（如旋轉角度、平移距離）設計鏡頭運動，
+並可藉由文字提示引導視訊擴散模型生成符合預期的畫面風格，使最終影片的呈現方式具有一定的可塑性。
 
 本研究的主要貢獻如下：
 
