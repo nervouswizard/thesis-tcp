@@ -54,22 +54,11 @@ $\boldsymbol{\epsilon}_\theta(\mathbf{x}_t, t)$ 預測每步加入的雜訊，
 訓練完成後，模型從 $\mathbf{x}_T \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$ 出發，
 每步先由神經網路估計去噪後的 $\hat{\mathbf{x}}_0$，
 再以隨機採樣更新至 $\mathbf{x}_{t-1}$，
-最終還原出 $\mathbf{x}_0$，如圖~\ref{fig:ddpm} 所示。
-
-\begin{figure}[htbp]
-  \centering
-  \includegraphics[width=0.85\textwidth]{DDPM}
-  \caption{DDPM 反向採樣過程示意圖（取自 DDPM 原論文）。
-  實線箭頭表示學習到的去噪過程 $p_\theta(\mathbf{x}_{t-1} \mid \mathbf{x}_t)$，
-  虛線箭頭表示前向加噪過程 $q(\mathbf{x}_t \mid \mathbf{x}_{t-1})$。
-  模型從純雜訊 $\mathbf{x}_T$ 出發，沿馬可夫鏈逐步去噪，
-  最終還原出清晰的 $\mathbf{x}_0$。}
-  \label{fig:ddpm}
-\end{figure}
+最終還原出 $\mathbf{x}_0$，加噪與去噪過程如圖~\ref{fig:ddpmrw} 所示。
 
 \subsection{去噪擴散隱式模型（DDIM）}
 
-如圖~\ref{fig:ddpm} 所示，DDPM 的反向採樣沿著
+如圖~\ref{fig:ddpmrw} 所示，DDPM 的反向採樣沿著
 $\mathbf{x}_T \to \cdots \to \mathbf{x}_t \to \mathbf{x}_{t-1} \to \cdots \to \mathbf{x}_0$
 的馬可夫鏈逐步去噪，每一步均依賴前一步且包含隨機雜訊項，
 完整採樣需要 $T$（通常為 1000）步，推論速度緩慢。
@@ -127,7 +116,7 @@ DDIM 可對時間步序列進行子採樣（subsampling），
 對高解析度圖片的記憶體與計算需求極高。
 潛在擴散模型（Latent Diffusion Models，LDM）\cite{ldm}
 將擴散過程移至低維潛在空間以降低運算需求，
-整體架構如圖~\ref{fig:ldm} 所示，由兩個主要元件構成。
+整體架構如圖~\ref{fig:ldmrw} 所示，由兩個主要元件構成。
 
 \textbf{變分自動編碼器（Variational Autoencoder，VAE）}
 負責像素空間與潛在空間之間的轉換，
@@ -151,35 +140,18 @@ VAE 透過同時最小化重建誤差（reconstruction loss）與
 
 \textbf{U-Net 去噪器}是 LDM 的核心運算模組，
 以 Ronneberger 等人提出的 U-Net \cite{unet} 為基礎，
-採對稱的編解碼架構搭配跳躍連接（skip connection）建構（圖~\ref{fig:ldm} 中央綠色區域）。
+採對稱的編解碼架構搭配跳躍連接（skip connection）建構（圖~\ref{fig:ldmrw} 中央綠色區域）。
 右側的條件編碼器 $\tau_\theta$ 可接受多種形式的條件輸入
 （語意圖、文字、特徵表示、圖像），
 透過交叉注意力機制（cross-attention，圖中 Q/K/V 模組）
 將編碼後的向量注入 U-Net 各層，使去噪預測以條件內容為引導。
 
-\begin{figure}[htbp]
-  \centering
-  \includegraphics[width=0.9\textwidth]{LDM}
-  \caption{LDM 整體架構（取自原論文 Figure 3）：
-  左側為像素空間的 VAE 編解碼器（$\mathcal{E}$/$\mathcal{D}$），
-  中央為在潛在空間執行擴散與去噪的 U-Net $\boldsymbol{\epsilon}_\theta$，
-  右側為透過 cross-attention 注入條件的編碼器 $\tau_\theta$。}
-  \label{fig:ldm}
-\end{figure}
-
 \subsection{Marigold}
 \label{subsec:marigold}
 
-Marigold \cite{marigold} 是一個將預訓練的文字轉圖像擴散模型
-直接重新用於單目深度估算任務的方法，
-以去噪擴散過程取代傳統的判別式回歸。
-其核心思想是以預訓練的文字轉圖像 LDM（Stable Diffusion v2）\cite{ldm}作為模型起點，
-直接繼承其在大規模圖文資料集 LAION-5B \cite{LAION-5B}
-上學習到的豐富視覺先驗知識。
-相較於在大規模真實場景深度資料集上從頭訓練的監督式方法，
-Marigold 僅需以少量合成場景深度資料（Hypersim、Virtual KITTI）進行微調，
-即可借助預訓練階段積累的跨場景視覺先驗，
-對未見過的真實世界場景進行零樣本泛化深度估算。
+Marigold 的整體架構設計已於第二章介紹，
+本節就其訓練與推論的具體機制展開說明，
+作為後續 Marigold-DC 引導機制與 \textit{ChinesePaintingLoss} 設計的理論基礎。
 整體訓練流程如圖~\ref{fig:marigold} 所示。
 
 \paragraph{訓練階段}
@@ -208,18 +180,6 @@ Marigold 推論時採用 DDIM 確定性採樣：
 由於深度圖與 RGB 圖像具備相似的局部平滑性與空間相關結構，
 VAE 潛在空間的統計特性對深度模態同樣適用，
 Marigold 無須重新設計編解碼器，可直接沿用預訓練的 Stable Diffusion VAE。
-
-\begin{figure}[htbp]
-  \centering
-  \includegraphics[width=0.9\textwidth]{marigold_pipeline}
-  \caption{Marigold fine-tuning 流程（取自原論文）。
-  上方路徑：RGB 圖片 $\mathbf{x}$ 經凍結的潛在編碼器壓縮為條件編碼 $\mathbf{z}^{(\mathbf{x})}$。
-  中間路徑：深度圖 $\mathbf{d}$ 同樣經凍結編碼器壓縮後，
-  與採樣雜訊 $\boldsymbol{\epsilon}$ 依時間步 $t$ 疊加，得到帶噪深度潛在向量 $\mathbf{z}_t^{(\mathbf{d})}$。
-  兩條路徑的潛在向量拼接後輸入 U-Net，預測雜訊 $\hat{\boldsymbol{\epsilon}}$，
-  訓練目標為最小化 $\|\boldsymbol{\epsilon} - \hat{\boldsymbol{\epsilon}}\|^2$。}
-  \label{fig:marigold}
-\end{figure}
 
 \section{深度估算}
 \label{sec:depth}
@@ -609,7 +569,7 @@ $D_{\mathrm{refined}} \in [0,1]^{H \times W}$，供後續反投影使用。
         Marigold-DC 以擴散去噪為推論機制，不估算相機幾何參數，無法輸出 $\mathbf{K}$。
 \end{enumerate}
 
-因此本研究引入 Depth Anything V3 \cite{depthanything}（架構如圖~\ref{fig:da3pipeline}）
+因此本研究引入 Depth Anything V3 \cite{depthanything}（架構如圖~\ref{fig:da3rw}）
 來解決上述兩項限制，取得準確的三維點雲。
 DA-V3 以大規模多樣化資料進行監督訓練，能直接從輸入影像估算公制深度，
 並在內部估算相機內參矩陣 $\mathbf{K}$；
@@ -618,13 +578,6 @@ DA-V3 以大規模多樣化資料進行監督訓練，能直接從輸入影像�
 本研究以 $D_{\mathrm{refined}}$ 的灰階視覺化圖作為 DA-V3 的輸入，
 令其在保留 Marigold-DC 精煉後空間結構的前提下，
 直接輸出帶有公制尺度的三維點雲，供後續 Uni3C 渲染使用。
-
-\begin{figure}[htbp]
-  \centering
-  \includegraphics[width=0.9\linewidth]{da3_pipeline.png}
-  \caption{Depth Anything V3 架構示意圖。輸入影像經 Image Patch Embed 後進入以 Vanilla DINOv2 \cite{dinov2} 為骨幹的 Single Transformer，再透過 Dual-DPT Head 同時輸出真實深度圖（Depth）、射線方向（Ray）與三維點座標（Points），並可選擇性地加入相機內參 token（Camera）以提升估算精度。}
-  \label{fig:da3pipeline}
-\end{figure}
 
 所輸出的點雲以原始輸入國畫圖片的像素色彩著色，
 在三維空間中同時記錄每個點的幾何位置與色彩資訊，
