@@ -138,6 +138,21 @@ Depth Anything V3 \cite{depthanything} 以大規模多樣化資料訓練，
   \label{fig:da3rw}
 \end{figure}
 
+\begin{figure}
+  \centering
+  \includegraphics[width=0.9\textwidth]{marigoldDC_pipeline}
+  \caption{Marigold-DC 引導推論流程。
+  上半部：推論路徑，RGB 圖像 $\mathbf{x}$ 經潛在編碼器得 $\mathbf{z}^{(\mathbf{x})}$，
+  深度潛在向量 $\mathbf{z}_t^{(\mathbf{d})}$ 與其拼接後送入 U-Net 去噪，
+  完成所有去噪步驟後得到乾淨潛在特徵 $\mathbf{z}_0^{(\mathbf{d})}$，
+  再經 VAE 解碼器 $\mathcal{D}(\cdot)$ 解碼為仿射不變深度圖 $\hat{\mathbf{d}}^{(m)}$。
+  下半部：稀疏引導路徑，每個去噪步驟中以 Tweedie 公式預估當前深度中間值
+  $\hat{\mathbf{d}}_t^{(m)}$，計算其與稀疏控制點 $\mathbf{c}$ 之損失 $\mathcal{L}$，
+  並反向傳播至潛在向量以施加幾何約束。
+  綠色鎖頭表示凍結的預訓練參數；火焰符號表示可學習的尺度與偏移（$\hat{a}, \hat{b}$）。}
+  \label{fig:marigolddc}
+\end{figure}
+
 Marigold-DC \cite{marigolddc} 在 Marigold 基礎上引入稀疏深度引導機制（sparse depth completion）。
 使用者僅需提供少量像素位置的深度數值作為控制點，
 模型即可在去噪迭代過程中以這些稀疏約束引導整體深度場的生成，
@@ -231,7 +246,7 @@ Fu 等人 \cite{highreliefbrush} 首次提出從單張水墨畫生成高浮雕�
   \label{fig:highreliefrw}
 \end{figure}
 
-Zero-1-to-3、Difix3D+ 與 WonderWorld 均以真實場景照片或合成三維物件
+Zero-1-to-3 \cite{zero123}、Difix3D+ \cite{difix3d} 與 WonderWorld \cite{wonderworld} 均以真實場景照片或合成三維物件
 為主要訓練與評估對象，不適合直接應用於國畫：
 Zero-1-to-3 以單一物件為中心，國畫場景不具備可提取的物件級幾何結構；
 Difix3D+ 依賴既有三維重建輸出，而國畫缺乏足夠的多視角資料支持重建流程；
@@ -243,20 +258,20 @@ WonderWorld 雖使用深度估算驅動場景擴展，但其深度模組以真�
 引入人機協作（human-in-the-loop）的稀疏深度控制點標注機制，
 並結合專為國畫設計的 \textit{ChinesePaintingLoss}，
 使深度估算結果既符合畫面的視覺語意，又保留使用者對關鍵區域的主動調控能力，
-從而在真實三維資料極度稀缺的條件下，仍能生成具有說服力的 2.5D 動態影片。
+從而在真實三維資料極度稀缺的條件下，仍能生成具有說服力的 2.5D 影片。
 
 \section{基於擴散模型的新視角合成與視訊生成}
 
 新視角合成（novel view synthesis）與視訊生成的結合，
-為從單張圖像生成具有攝影機運動感的動態影片提供了可行框架。
+為從單張圖像生成具有攝影機運動感的影片提供了可行框架。
 
 ViewCrafter \cite{viewcrafter} 以單張圖片與點雲渲染結果為條件，
 利用視訊擴散模型生成高保真度（high-fidelity）的新視角合成影片。
 其關鍵貢獻在於以點雲渲染提供幾何先驗，
 驅動擴散模型在去噪過程中維持場景的三維一致性，
 同時填補因視角偏移而露出的遮擋區域，
-如圖~\ref{fig:viewcrafterrw}~所示。
-本研究的流程設計受 ViewCrafter 的啟發，採用相似的點雲引導框架。
+此論文顯示以點雲作為幾何引導是驅動視訊擴散模型生成三維一致影片的有效手段。
+ViewCrafter 架構如圖~\ref{fig:viewcrafterrw}~所示。
 
 \begin{figure}[htbp]
   \centering
@@ -283,7 +298,16 @@ Uni3C \cite{uni3c} 提出統一的三維強化控制框架，
 在去噪過程中施加嚴格的幾何約束，確保生成影片的視角移動與輸入軌跡一致。
 本研究採用 Uni3C 的 PCDController 作為最終視訊生成模組，
 以點雲影片引導視訊擴散模型填補遮擋空洞並維持國畫整體風格。
+另外本研究有針對國畫領域做相對應的專屬改動，
+整體改動詳見第~\ref{sec:video}~節。
 Uni3C 的整體架構如圖~\ref{fig:uni3cpipeline}~所示。
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.95\linewidth]{uni3c_pipeline.png}
+  \caption{Uni3C 視訊生成架構示意圖。點雲渲染影片經 Wan2.1 的 3D-VAE 編碼為 Point Latent（$c_{\mathrm{pcd}}$），並以六通道 Plücker Ray Embedding 編碼各像素的三維位置與射線方向，作為 PCDController 的兩類引導訊號。第一幀影像透過 Image CLIP 與 Wan-Encoder 提取視覺特徵，連同文字提示一同注入視訊擴散模型（Wan-DiT）的去噪過程。PCDController 透過零初始化線性層投影後，以 Element-wise Addition 的方式將幾何訊號注入 Wan-I2V 前 20 層的去噪過程，確保生成影片的攝影機軌跡與點雲渲染結果一致，最終由 Wan-Decoder 解碼輸出完整的 2.5D 影片。}
+  \label{fig:uni3cpipeline}
+\end{figure}
 
 上述方法雖然在點雲引導視訊生成領域取得重要進展，
 但均以真實場景影像為主要訓練資料，對國畫的特殊視覺特性缺乏針對性設計。
@@ -304,4 +328,4 @@ Uni3C 雖提供更精確的幾何引導機制，但同樣未針對國畫的風�
 （三）\textbf{風格保持視訊生成}：以 Uni3C 的 PCDController 取代 ViewCrafter 的視訊擴散控制模組，
 在更嚴格的幾何約束下驅動視訊擴散模型，同時利用其擴散先驗在填補遮擋空洞時維持國畫筆墨風格。
 上述改進的核心難點在於國畫深度標注資料極度稀缺，無法以監督式方式直接訓練；
-本研究因此採用人機協作與擴散先驗相結合的策略，在有限資料條件下仍能產生符合畫意的深度估算與 2.5D 動態影片。
+本研究因此採用人機協作與擴散先驗相結合的策略，在有限資料條件下仍能產生符合畫意的深度估算與 2.5D 影片。
