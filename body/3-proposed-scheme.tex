@@ -629,7 +629,7 @@ DA-V3 以大規模多樣化資料進行監督訓練，能直接從輸入影像�
   引導 Marigold-DC ，輸出精煉深度圖 $D_{\mathrm{refined}}$，
   再由 Depth Anything V3 反投影得到幾何精準點雲。
   下半部為視訊生成階段：
-  本研究設計球面相機軌跡，將幾何精準點雲渲染為點雲逐幀影片 $V_{\mathrm{pcd}}$ 與空洞遮罩（Masks），
+  本研究設計圓形相機軌跡，將幾何精準點雲渲染為點雲逐幀影片 $V_{\mathrm{pcd}}$ 與空洞遮罩（Masks），
   配合針對國畫靜態場景特性設計的正負向文字提示，
   共同作為 Uni3C \cite{uni3c} 的引導條件，
   驅動 Wan-DiT \cite{wan2025} 生成具視差感且風格一致的 2.5D 影片。}
@@ -662,7 +662,7 @@ DA-V3 以大規模多樣化資料進行監督訓練，能直接從輸入影像�
 並在此基礎上提出針對國畫領域的改進架構——
 Traditional Chinese Painting Uni3C（TCP-Uni3C）。
 TCP-Uni3C 以 $D_{\mathrm{refined}}$ 反投影所得的幾何精準點雲影片 $V_{\mathrm{pcd}}$，
-配合針對國畫靜態場景設計的文字提示與球面相機軌跡，
+配合針對國畫靜態場景設計的文字提示與圓形相機軌跡，
 協同驅動 Wan-DiT \cite{wan2025} 的去噪過程，如圖~\ref{fig:tcp_uni3c}~所示。
 
 \begin{figure}[htbp]
@@ -687,12 +687,18 @@ TCP-Uni3C 以 $D_{\mathrm{refined}}$ 反投影所得的幾何精準點雲影片 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\textwidth]{uni3c_comp}
-  \caption{不同深度估算方法生成的點雲圖比較。
-    最左幀為輸入國畫；
-    中間三幀為原始 Uni3C 以 Depth-Pro 進行單目深度估算後所生成的渲染結果；
-    右側三幀為本研究以精煉深度 $D_{\mathrm{refined}}$ 驅動的點雲渲染結果。}
+  \caption{原始 Uni3C 與本研究 TCP-Uni3C 的生成結果比較。
+    最左側（first frame）為輸入國畫，同時作為影片的第一幀；
+    中間欄位依序展示原始 Uni3C 的點雲影片 $V_{\mathrm{pcd}}$ 與最終生成影片（generated video），
+    右側欄位則為 TCP-Uni3C 對應的 $V_{\mathrm{pcd}}$ 與生成影片。
+    可以看出原始 Uni3C 因以 Depth-Pro 估算的平面化深度驅動點雲，
+    生成結果呈現出攝影機繞著畫框旋轉的效果，缺乏真實的景深視差；
+    相比之下 TCP-Uni3C 以精煉深度 $D_{\mathrm{refined}}$ 驅動，
+    生成具有視差效果的 2.5D 影片。}
   \label{fig:uni3c_comp}
 \end{figure}
+
+\paragraph{相機內參矩陣}
 
 因此 TCP-Uni3C 以本研究前述流程所生成的精準點雲直接取代 Depth-Pro 的輸出，
 僅保留 Depth-Pro 對參考影像估算的焦距 $f_{\mathrm{px}}$，
@@ -735,6 +741,59 @@ r = \frac{H_{\mathrm{pcd}} \cdot f_{\mathrm{px}}}{h}
   \label{fig:camera_distance}
 \end{figure}
 
+\paragraph{相機外參與軌跡}
+
+確定相機距離 $r$ 後，需進一步定義每一幀的相機旋轉與位置，即外參矩陣 $[\mathbf{R}_i \mid \mathbf{t}_i]$。
+本研究採用圓形軌跡（circular trajectory），以初始相機視角 $\mathbf{C}_0$ 為基準，
+對每一幀施加方位角偏移 $\Delta\phi_i$（azimuth，水平方向）
+與俯仰角偏移 $\Delta\theta_i$（elevation，垂直方向）。
+影片共 $F$ 幀，其中首幀不套用任何角度偏移，維持初始相機視角 $\mathbf{C}_0$（對應輸入國畫的原始構圖）；
+其餘 $N = F-1$ 幀（對應影片第 $2$ 至第 $F$ 幀）的角度偏移量由參數 $t_i = \frac{2\pi i}{N}$（$i = 0, \ldots, N-1$）決定：
+
+\begin{equation}
+  \Delta\phi_i   =  A_\phi \sin(t_i), \qquad
+  \Delta\theta_i = -A_\theta \cos(t_i)
+\end{equation}
+
+其中 $A_\phi$、$A_\theta$ 分別為水平與垂直方向的角度振幅，
+可依畫作構圖與所需視差強度獨立設定；
+本研究預設 $A_\phi = A_\theta = 3^\circ$，即相機相對初始位置的最大偏移量為 $\pm 3^\circ$，整體運動範圍涵蓋 $6^\circ$。
+振幅刻意設定為小角度，是因為相機偏移角度過大時，
+點雲渲染所得的 $V_{\mathrm{pcd}}$ 中露出的破洞區域隨之擴大，
+擴散模型須自行補全的內容比例增加，最終生成影片的品質因而下降。
+水平與垂直偏移之間存在 $90^\circ$ 的相位差（$\sin$ 對 $\cos$），
+使兩者在 $(\Delta\phi,\,\Delta\theta)$ 空間中描繪出一條封閉的圓形路徑
+（若兩振幅設定為不同值，則路徑為橢圓），
+確保攝影機在水平與垂直方向同時產生平滑的視差運動；
+值得注意的是，$t_0 = 0$ 時偏移量為 $(0,\,-A_\theta)$，
+即軌跡幀並非由 $\mathbf{C}_0$ 出發，而是自初始視角上方 $A_\theta$ 處進入圓形路徑；
+又由於參數取樣均勻分佈於 $[0,\,2\pi)$ 且不含終點，
+末幀恰落於軌跡入口的前一步，使整段繞行運動首尾平滑銜接。
+完整軌跡的三維視覺化如圖~\ref{fig:camera_traj}~所示。
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.85\textwidth]{camera_traj}
+  \caption{圓形相機軌跡的三維視覺化。
+    綠色圓點（start）為初始相機位置（對應 $\mathbf{C}_0$），位於圓形軌跡的中心，對應影片首幀；
+    藍色圓環為角度偏移 $(\Delta\phi,\,\Delta\theta)$ 所構成的封閉圓形軌跡，
+    灰色錐體為沿軌跡取樣的相機視錐（camera frustum）；
+    紅色方塊（end）為末幀相機位置，落於軌跡入口鄰近處。
+    右側為國畫反投影所得的三維點雲。}
+  \label{fig:camera_traj}
+\end{figure}
+
+各幀的相機到世界矩陣（camera-to-world）由對應的旋轉矩陣複合而得：
+
+\begin{equation}
+  \mathbf{C}_i = \mathbf{R}_\phi(\Delta\phi_i)\,\mathbf{R}_\theta(\Delta\theta_i)\,\mathbf{C}_0
+\end{equation}
+
+其中 $\mathbf{R}_\phi$ 為繞 $y$ 軸的旋轉矩陣，$\mathbf{R}_\theta$ 為繞 $x$ 軸的旋轉矩陣；
+外參矩陣取自其逆矩陣的前三行：$[\mathbf{R}_i \mid \mathbf{t}_i] = \bigl[\mathbf{C}_i^{-1}\bigr]_{3\times4}$，其中下標 $3\times4$ 表示截取前三行。
+每幀的外參矩陣與內參矩陣 $\mathbf{K}$ 共同決定各幀的點雲光柵化投影結果，
+構成後續的幾何引導條件。
+
 Uni3C 的點雲引導機制同時解決了空洞補全問題：
 對於有點雲投影覆蓋的像素，模型以點雲幾何約束生成，確保輸出與三維結構一致；
 對於視角偏移後露出的空洞區域，點雲中缺乏對應幾何資料，
@@ -742,8 +801,10 @@ Wan-DiT 改以第一幀的視覺外觀先驗與文字提示的語意引導自動
 生成在風格與語意上均與周圍影格一致的內容，
 避免傳統影像修補在缺乏語意理解下產生的不自然結果。
 
+\paragraph{2.5D視覺呈現文字提示}
+
 本研究在未修改 Uni3C 主體架構的前提下，
-針對國畫動動畫生成的特性，對底層 Wan2.1 I2V 模型的文字提示進行專屬設計。
+針對國畫動畫生成的特性，對底層 Wan2.1 I2V 模型的文字提示進行專屬設計。
 正向提示設定為：
 \begin{quote}
 \textit{``This video describes a slow and stable camera movement with a static 3D object.''}
