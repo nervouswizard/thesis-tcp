@@ -1,4 +1,222 @@
 % !TEX root = ../main.tex
 \hspace{24pt}
 
-（待補）
+本章針對第三章提出的 TCP-Uni3C 流程進行實驗評估。
+第~\ref{sec:exp_setup}~節說明實驗環境、測試素材與比較基準；
+第~\ref{sec:exp_depth}~節評估深度估算品質，
+包含與現有方法的定性比較，以及 \textit{ChinesePaintingLoss} 各損失分項的消融實驗；
+第~\ref{sec:exp_video}~節呈現最終 2.5D 影片生成結果，
+並分析相機參數設定對生成品質的影響；
+第~\ref{sec:exp_discussion}~節討論本方法的適用範圍與現有限制。
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{實驗設置}
+\label{sec:exp_setup}
+% ─────────────────────────────────────────────────────────────────────────────
+
+\subsection{硬體與軟體環境}
+
+% TODO: 依實際環境修改
+所有實驗均於配備單張 NVIDIA GeForce RTX 4090（24 GB VRAM）的工作站上執行，
+作業系統為 Ubuntu 22.04。
+深度估算模組以 PyTorch 實作；
+點雲反投影與視訊生成透過 ComfyUI 工作流程整合 Depth Anything V3 與 Uni3C 推論管線。
+
+\subsection{比較基準}
+
+為驗證本研究各模組的貢獻，實驗設定以下比較對象：
+
+\begin{itemize}
+  \item \textbf{深度估算部分}：
+    以 Depth Anything V2 直接推論作為基準，
+    與本研究「稀疏控制點 + \textit{ChinesePaintingLoss}」的完整設定比較。
+  \item \textbf{影片生成部分}：
+    以原始 Uni3C（內建 Depth-Pro 深度估算）作為基準，
+    與 TCP-Uni3C（精煉深度點雲引導）比較。
+\end{itemize}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{深度估算結果}
+\label{sec:exp_depth}
+% ─────────────────────────────────────────────────────────────────────────────
+
+\subsection{與現有方法的定性比較}
+
+圖~\ref{fig:depth_comparison}~呈現不同深度估算方法在測試畫作上的結果比較。
+基準方法在國畫上呈現典型的深度誤判：
+留白背景被賦予中等距離的深度值，與主體之間缺乏層次區隔，
+整體深度場趨於扁平。
+本研究以稀疏控制點搭配 \textit{ChinesePaintingLoss} 精煉後，
+留白區域確實被推往最遠端，
+主體輪廓沿筆觸邊界清晰浮現，
+前後景的深度層次與畫作的空間語意一致。
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\textwidth]{depth_comparison}
+  \caption{不同深度估算方法的定性比較。
+    共三組畫作，
+    每組由左至右依序為：輸入原圖、Depth Anything V2\cite{depthanythingv2} 推論結果、
+    本研究（稀疏控制點 + \textit{ChinesePaintingLoss}）的精煉深度圖；
+    深度圖中亮處為近景、暗處為遠景。
+    基準方法將留白背景誤判為中距離（呈灰色），
+    本研究則將留白正確壓至遠端（呈黑色），主體與背景層次分明。}
+  \label{fig:depth_comparison}
+\end{figure}
+
+\subsection{ChinesePaintingLoss 消融實驗}
+
+為量化各損失分項的貢獻，本研究依序累加損失函數並觀察深度圖品質的變化：
+
+\begin{enumerate}
+  \item 僅 $\mathcal{L}_{\mathrm{metric}}$
+  \item $\mathcal{L}_{\mathrm{metric}} + \mathcal{L}_{\mathrm{brush}}$
+  \item $\mathcal{L}_{\mathrm{metric}} + \mathcal{L}_{\mathrm{brush}} + \mathcal{L}_{\mathrm{white}}$
+        （完整 \textit{ChinesePaintingLoss}）
+\end{enumerate}
+
+圖~\ref{fig:exp_ablation}~呈現三種設定下的深度估算結果。
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\textwidth]{exp_ablation}
+  \caption{\textit{ChinesePaintingLoss} 消融實驗結果。
+    共三組畫作，
+    每組由左至右依序為：輸入原圖、僅 $\mathcal{L}_{\mathrm{metric}}$、
+    $\mathcal{L}_{\mathrm{metric}} + \mathcal{L}_{\mathrm{brush}}$、
+    $\mathcal{L}_{\mathrm{metric}} + \mathcal{L}_{\mathrm{brush}} + \mathcal{L}_{\mathrm{white}}$（完整 \textit{ChinesePaintingLoss}）；
+    深度圖中亮處為近景、暗處為遠景。
+    隨損失分項逐步累加，筆觸兩側的深度斷裂逐漸消除，
+    留白背景被壓往遠端，主體與背景的層次愈加分明。}
+  \label{fig:exp_ablation}
+\end{figure}
+
+僅使用 $\mathcal{L}_{\mathrm{metric}}$ 時，
+控制點位置的深度值成功收斂至使用者標注，前後景大致分離；
+然而控制點以外的區域缺乏結構性約束，
+濃墨筆觸兩側易出現不自然的深度斷裂，主體內部的深度亦欠平滑。
+加入 $\mathcal{L}_{\mathrm{brush}}$ 後，
+邊緣權重於筆觸輪廓處自動降低平滑懲罰、於其餘區域維持平滑壓力，
+使主體內部深度趨於連續，筆觸斷裂明顯減少。
+最後加入 $\mathcal{L}_{\mathrm{white}}$ 構成完整 \textit{ChinesePaintingLoss}，
+大片留白背景被進一步壓往最遠端，
+主體與背景的深度對比更為分明，
+符合國畫以留白表現深遠空間的視覺語意。
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{2.5D 影片生成結果}
+\label{sec:exp_video}
+% ─────────────────────────────────────────────────────────────────────────────
+
+\subsection{與原始 Uni3C 的比較}
+
+圖~\ref{fig:exp_uni3c}~比較原始 Uni3C 與 TCP-Uni3C 的生成結果。
+原始 Uni3C 以內建 Depth-Pro 估算的深度驅動，
+由於無法取得準確的深度，生成結果難以預期，
+可能出現幾何扭曲或缺乏空間層次的現象；
+TCP-Uni3C 以精煉深度反投影的點雲引導生成，
+前景主體與背景之間可見明顯的視差位移，
+畫面呈現出真實的空間縱深感。
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\textwidth]{exp_uni3c}
+  \caption{原始 Uni3C 與 TCP-Uni3C 生成結果比較。
+    共三組畫作，
+    每組最左側為輸入國畫（Input Image，即影片首幀），
+    中間四幀為 TCP-Uni3C 的生成結果，
+    右側四幀為原始 Uni3C 的生成結果。
+    TCP-Uni3C 的影格間呈現平滑的前後景視差變化，並維持原畫的筆墨風格；
+    原始 Uni3C 因深度估算失準，生成結果難以預期，
+    如第三組荷花的影格邊緣即出現原畫中不存在的綠色色塊瑕疵。}
+  \label{fig:exp_uni3c}
+\end{figure}
+
+\subsection{相機參數的影響}
+
+第三章的相機與生成設定涉及多項可調參數：
+初始相機距離的縮放係數、相機的垂直偏移、圓形軌跡的角度振幅，
+以及輸入視訊擴散模型的正負向文字提示。
+本節以荷花畫作為例，自基準設定出發逐項變更參數，
+觀察各參數對生成品質的影響，結果如圖~\ref{fig:exp_failure}~所示。
+
+基準設定將相機距離縮放係數設為 $0.85$、垂直偏移設為 $0.01$、
+角度振幅設為 $15^\circ$，
+並採用第三章設計的國畫專屬正負向文字提示，
+生成結果視差平滑且維持原畫風格（圖~\ref{fig:exp_failure}~ TCP-Uni3C）。
+三組對照設定的變更內容與對應結果如下：
+
+\begin{enumerate}
+  \item \textbf{相機距離設定不佳}：
+        將距離縮放係數由 $0.85$ 改為 $1.0$，
+        由於相機距點雲較遠，畫面中缺乏點雲覆蓋的背景比例增加，
+        荷葉等墨色區域出現擴張變形與筆觸細節流失（圖~\ref{fig:exp_failure}~ $\Delta$ Distance）。
+  \item \textbf{角度振幅設定不佳}：
+        振幅改為 $20^\circ$，
+        由於視角偏移過大使破洞面積急遽擴大，
+        生成結果出現明顯的幾何扭曲與內容幻覺，
+        如憑空出現的花瓣與形狀失真的荷葉（圖~\ref{fig:exp_failure}~ $\Delta$ Amplitude）。
+  \item \textbf{文字提示設定}：
+        正向提示改為\textit{``This video features a lotus''}、負向提示留空，
+        與Uni3C中採用類似的設定，
+        由於缺乏「攝影機運動、靜態場景」的語意約束與負向提示的抑制，
+        影格邊緣出現原畫中不存在的彩色條紋與雜訊圖樣（圖~\ref{fig:exp_failure}~ $\Delta$ Test prompt）。
+\end{enumerate}
+
+上述結果驗證了第三章各項設計決策的必要性：
+縮短相機距離與控制振幅上限，
+可將待填補區域維持在擴散模型能穩定補全的範圍內；
+國畫專屬文字提示則確保填補內容符合靜態場景的語意預期。
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{討論與限制}
+\label{sec:exp_discussion}
+% ─────────────────────────────────────────────────────────────────────────────
+
+\subsection{適用範圍}
+
+本研究方法在主體輪廓清晰、物件間界線分明、留白比例適中的水墨國畫上表現最佳，
+例如以單一主體搭配大片留白構圖的花鳥畫。
+此類畫作的筆觸邊界可被 $\mathcal{L}_{\mathrm{brush}}$ 有效辨識，
+留白區域亦能由 $\mathcal{L}_{\mathrm{white}}$ 正確推往遠端，
+配合少量控制點即可重建出符合空間語意的深度場，
+進而生成視差自然的 2.5D 影片。
+
+\subsection{現有限制}
+
+\textbf{筆觸重疊區域的深度歧義。}
+本研究的人工標注以像素點為單位，每個控制點僅能為單一像素位置指定一個深度值。
+然而水墨畫常以筆觸相互重疊的方式表現多物體交錯的空間關係——
+前後物體的墨色在同一區域內暈染交融，呈現近似半透明的視覺效果。
+此時單一像素實際上同時承載多個物體的深度資訊，
+而本方法缺乏將畫面分解為多個深度圖層（layer）的機制，
+無論控制點指定何值，該區域都只能收斂至單一深度，
+難以獲得具說服力的深度估算結果。
+
+\textbf{大面積填補的生成品質下降。}
+最終影片由視訊擴散模型生成，
+視角偏移後露出的破洞區域與缺乏點雲覆蓋的背景區域均須由模型自行填補。
+當此類待填補範圍過大時，
+點雲提供的幾何約束在畫面中的佔比相對下降，
+生成結果的不確定性隨之升高，
+可能出現與原畫風格不一致的補全內容，導致影片品質不如預期。
+此亦為第三章將相機角度振幅上限控制在 $15^\circ$ 以內的主要原因；
+圖~\ref{fig:exp_failure}~中振幅超過上限與相機距離未縮短的案例，
+即為此現象的具體實例。
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\textwidth]{exp_failure}
+  \caption{相機參數與文字提示設定不當的失敗案例分析。
+    最左側為輸入國畫，右側每列為一種設定下影片的四個取樣影格，
+    由上至下依序為：
+    TCP-Uni3C（距離縮放 $0.85$、垂直偏移 $0.01$、振幅 $15^\circ$、國畫專屬文字提示）、
+    $\Delta$ Distance（縮放係數 $1.0$，相機距點雲過遠）、
+    $\Delta$ Amplitude（振幅 $20^\circ$，超過上限）、
+    $\Delta$ Test prompt（通用文字提示且無負向提示）。
+    基準設定生成品質穩定；
+    後三列分別呈現墨色區域擴張變形、
+    幾何扭曲與內容幻覺，
+    以及影格邊緣的彩色條紋瑕疵。}
+  \label{fig:exp_failure}
+\end{figure}

@@ -8,7 +8,7 @@
 然而國畫本質上是靜態的二維圖片，缺乏動態感。
 在數位媒體高度發展的當代，觀眾對視覺內容的期待已從靜態轉向動態，
 社群平台與數位展覽也更傾向以影片形式呈現藝術作品以吸引更廣泛的受眾。
-若國畫能以動畫ㄕ影片的形式呈現，不僅能讓觀者更直觀地感受畫作中的空間層次，
+若國畫能以動畫影片的形式呈現，不僅能讓觀者更直觀地感受畫作中的空間層次，
 也有助於傳統藝術在數位時代觸及更年輕的族群，延續其文化價值。
 近年來已有多項研究致力於真實世界物體的 3D 模型建構 \cite{zero123}\cite{difix3d}
 與場景級的 2.5D 影片呈現 \cite{viewcrafter}\cite{wonderworld}\cite{trajectorycrafter}，
@@ -60,7 +60,7 @@
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\textwidth]{pipeline}
-  \caption{本研究提出之國畫 2.5D 影片生成流程。
+  \caption{本研究提出之國畫 2.5D 影片生成流程（TCP-Uni3C）。
   以單張國畫 Input image 為輸入，首先透過深度估算（Depth Estimate）取得初步深度圖 $D_{\mathrm{rough}}$；
   使用者依據 $D_{\mathrm{rough}}$ 標注（Manual adjustiment）稀疏深度控制點 $G$，
   作為改進後的 Marigold-DC 的引導條件，輸出精煉深度圖 $D_{\mathrm{refined}}$；
@@ -108,7 +108,9 @@
 
 \begin{itemize}
   \item 針對現有擴散式深度估算模型在國畫風格圖像上的估算偏差問題，
-        引入以稀疏深度控制點引導的 Marigold-DC，
+        設計一套互動式稀疏控制點標注介面，
+        使用者可直接於畫面上點選位置並指定深度值，
+        將標注結果便捷地輸入 Marigold-DC 作為引導條件，
         僅需少量人工標注即可有效修正深度圖中的錯誤區域。
 
   \item 設計專為國畫特性量身打造的複合損失函數 \textit{ChinesePaintingLoss}，
