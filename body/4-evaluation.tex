@@ -1,236 +1,236 @@
 % !TEX root = ../main.tex
 \hspace{24pt}
 
-本章針對第三章提出的 TCP-Uni3C 流程進行實驗評估。
-第~\ref{sec:exp_setup}~節說明實驗環境、測試素材與比較基準；
-第~\ref{sec:exp_depth}~節評估深度估算品質，
-包含與現有方法的定性比較，以及 \textit{ChinesePaintingLoss} 各損失分項的消融實驗；
-第~\ref{sec:exp_video}~節呈現最終 2.5D 影片生成結果，
-並分析相機參數設定對生成品質的影響；
-第~\ref{sec:exp_discussion}~節討論本方法的適用範圍與現有限制。
+This chapter presents an experimental evaluation of the TCP-Uni3C pipeline proposed in Chapter 3.
+Section~\ref{sec:exp_setup} describes the experimental environment, test materials, and baselines;
+Section~\ref{sec:exp_depth} evaluates the quality of depth estimation,
+including a qualitative comparison with existing methods and an ablation study of the individual loss terms of \textit{ChinesePaintingLoss};
+Section~\ref{sec:exp_video} presents the final 2.5D video generation results
+and analyzes the effect of camera parameter settings on generation quality;
+Section~\ref{sec:exp_discussion} discusses the scope of applicability and current limitations of the proposed method.
 
 % ─────────────────────────────────────────────────────────────────────────────
-\section{實驗設置}
+\section{Experimental Setup}
 \label{sec:exp_setup}
 % ─────────────────────────────────────────────────────────────────────────────
 
-\subsection{硬體與軟體環境}
+\subsection{Hardware and Software Environment}
 
-% TODO: 依實際環境修改
-所有實驗均於配備單張 NVIDIA GeForce RTX 4090（24 GB VRAM）的工作站上執行，
-作業系統為 Ubuntu 22.04。
-深度估算模組以 PyTorch 實作；
-點雲反投影與視訊生成透過 ComfyUI 工作流程整合 Depth Anything V3 與 Uni3C 推論管線。
+% TODO: adjust according to the actual environment
+All experiments were conducted on a workstation equipped with a single NVIDIA GeForce RTX 4090 (24 GB VRAM),
+running Ubuntu 22.04.
+The depth estimation module is implemented in PyTorch;
+point-cloud unprojection and video generation are integrated through a ComfyUI workflow that combines the Depth Anything V3 and Uni3C inference pipelines.
 
-\subsection{比較基準}
+\subsection{Baselines}
 
-為驗證本研究各模組的貢獻，實驗設定以下比較對象：
+To validate the contribution of each module in this study, the experiments include the following baselines:
 
 \begin{itemize}
-  \item \textbf{深度估算部分}：
-    以 Depth Anything V2 直接推論作為基準，
-    與本研究「稀疏控制點 + \textit{ChinesePaintingLoss}」的完整設定比較。
-  \item \textbf{影片生成部分}：
-    以原始 Uni3C（內建 Depth-Pro 深度估算）作為基準，
-    與 TCP-Uni3C（精煉深度點雲引導）比較。
+  \item \textbf{Depth estimation}:
+    direct inference with Depth Anything V2 serves as the baseline,
+    compared against the full configuration of this study (sparse control points + \textit{ChinesePaintingLoss}).
+  \item \textbf{Video generation}:
+    the original Uni3C (with its built-in Depth-Pro depth estimation) serves as the baseline,
+    compared against TCP-Uni3C (guided by the point cloud from the refined depth).
 \end{itemize}
 
 % ─────────────────────────────────────────────────────────────────────────────
-\section{深度估算結果}
+\section{Depth Estimation Results}
 \label{sec:exp_depth}
 % ─────────────────────────────────────────────────────────────────────────────
 
-\subsection{與現有方法的定性比較}
+\subsection{Qualitative Comparison with Existing Methods}
 
-圖~\ref{fig:depth_comparison}~呈現不同深度估算方法在測試畫作上的結果比較。
-基準方法在國畫上呈現典型的深度誤判：
-留白背景被賦予中等距離的深度值，與主體之間缺乏層次區隔，
-整體深度場趨於扁平。
-本研究以稀疏控制點搭配 \textit{ChinesePaintingLoss} 精煉後，
-留白區域確實被推往最遠端，
-主體輪廓沿筆觸邊界清晰浮現，
-前後景的深度層次與畫作的空間語意一致。
+Figure~\ref{fig:depth_comparison} compares the results of different depth estimation methods on the test paintings.
+The baseline method exhibits the typical depth misjudgments on TCP:
+the whitespace background is assigned intermediate depth values, lacking hierarchical separation from the main subject,
+and the overall depth field tends to be flat.
+After refinement with sparse control points and \textit{ChinesePaintingLoss},
+the white-space regions are indeed pushed to the farthest end,
+the subject contours emerge clearly along the brushstroke boundaries,
+and the foreground--background depth layering is consistent with the spatial semantics of the painting.
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\textwidth]{depth_comparison}
-  \caption{不同深度估算方法的定性比較。
-    共三組畫作，
-    每組由左至右依序為：輸入原圖、Depth Anything V2\cite{depthanythingv2} 推論結果、
-    本研究（稀疏控制點 + \textit{ChinesePaintingLoss}）的精煉深度圖；
-    深度圖中亮處為近景、暗處為遠景。
-    基準方法將留白背景誤判為中距離（呈灰色），
-    本研究則將留白正確壓至遠端（呈黑色），主體與背景層次分明。}
+  \caption{Qualitative comparison of different depth estimation methods.
+    Three groups of paintings are shown;
+    each group, from left to right: the input image, the inference result of Depth Anything V2\cite{depthanythingv2},
+    and the refined depth map of this study (sparse control points + \textit{ChinesePaintingLoss});
+    in the depth maps, bright regions are near and dark regions are far.
+    The baseline misjudges the whitespace background as mid-distance (shown in gray),
+    whereas our method correctly pushes the white space to the far end (shown in black), yielding clear separation between subject and background.}
   \label{fig:depth_comparison}
 \end{figure}
 
-\subsection{ChinesePaintingLoss 消融實驗}
+\subsection{Ablation Study of ChinesePaintingLoss}
 
-為量化各損失分項的貢獻，本研究依序累加損失函數並觀察深度圖品質的變化：
+To quantify the contribution of each loss term, we accumulate the loss functions one by one and observe the changes in depth map quality:
 
 \begin{enumerate}
-  \item 僅 $\mathcal{L}_{\mathrm{metric}}$
+  \item Only $\mathcal{L}_{\mathrm{metric}}$
   \item $\mathcal{L}_{\mathrm{metric}} + \mathcal{L}_{\mathrm{brush}}$
   \item $\mathcal{L}_{\mathrm{metric}} + \mathcal{L}_{\mathrm{brush}} + \mathcal{L}_{\mathrm{white}}$
-        （完整 \textit{ChinesePaintingLoss}）
+        (the full \textit{ChinesePaintingLoss})
 \end{enumerate}
 
-圖~\ref{fig:exp_ablation}~呈現三種設定下的深度估算結果。
+Figure~\ref{fig:exp_ablation} presents the depth estimation results under the three settings.
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\textwidth]{exp_ablation}
-  \caption{\textit{ChinesePaintingLoss} 消融實驗結果。
-    共三組畫作，
-    每組由左至右依序為：輸入原圖、僅 $\mathcal{L}_{\mathrm{metric}}$、
-    $\mathcal{L}_{\mathrm{metric}} + \mathcal{L}_{\mathrm{brush}}$、
-    $\mathcal{L}_{\mathrm{metric}} + \mathcal{L}_{\mathrm{brush}} + \mathcal{L}_{\mathrm{white}}$（完整 \textit{ChinesePaintingLoss}）；
-    深度圖中亮處為近景、暗處為遠景。
-    隨損失分項逐步累加，筆觸兩側的深度斷裂逐漸消除，
-    留白背景被壓往遠端，主體與背景的層次愈加分明。}
+  \caption{Results of the \textit{ChinesePaintingLoss} ablation study.
+    Three groups of paintings are shown;
+    each group, from left to right: the input image, $\mathcal{L}_{\mathrm{metric}}$ only,
+    $\mathcal{L}_{\mathrm{metric}} + \mathcal{L}_{\mathrm{brush}}$,
+    and $\mathcal{L}_{\mathrm{metric}} + \mathcal{L}_{\mathrm{brush}} + \mathcal{L}_{\mathrm{white}}$ (the full \textit{ChinesePaintingLoss});
+    in the depth maps, bright regions are near and dark regions are far.
+    As the loss terms are progressively accumulated, the depth discontinuities on both sides of the brushstrokes are gradually eliminated,
+    the whitespace background is pushed toward the far end, and the layering between subject and background becomes increasingly distinct.}
   \label{fig:exp_ablation}
 \end{figure}
 
-僅使用 $\mathcal{L}_{\mathrm{metric}}$ 時，
-控制點位置的深度值成功收斂至使用者標注，前後景大致分離；
-然而控制點以外的區域缺乏結構性約束，
-濃墨筆觸兩側易出現不自然的深度斷裂，主體內部的深度亦欠平滑。
-加入 $\mathcal{L}_{\mathrm{brush}}$ 後，
-邊緣權重於筆觸輪廓處自動降低平滑懲罰、於其餘區域維持平滑壓力，
-使主體內部深度趨於連續，筆觸斷裂明顯減少。
-最後加入 $\mathcal{L}_{\mathrm{white}}$ 構成完整 \textit{ChinesePaintingLoss}，
-大片留白背景被進一步壓往最遠端，
-主體與背景的深度對比更為分明，
-符合國畫以留白表現深遠空間的視覺語意。
+With $\mathcal{L}_{\mathrm{metric}}$ alone,
+the depth values at the control-point locations successfully converge to the user annotations, and the foreground and background are roughly separated;
+however, the regions beyond the control points lack structural constraints,
+unnatural depth discontinuities tend to appear on both sides of dense-ink brushstrokes, and the depth within the subject is insufficiently smooth.
+After adding $\mathcal{L}_{\mathrm{brush}}$,
+the edge weight automatically reduces the smoothness penalty along brushstroke contours while maintaining smoothing pressure elsewhere,
+making the depth within the subject more continuous and markedly reducing brushstroke-induced discontinuities.
+Finally, adding $\mathcal{L}_{\mathrm{white}}$ to form the full \textit{ChinesePaintingLoss}
+pushes the large whitespace background further toward the farthest end,
+sharpening the depth contrast between subject and background,
+in accordance with the visual semantics of TCP, in which white space conveys deep, distant space.
 
 % ─────────────────────────────────────────────────────────────────────────────
-\section{2.5D 影片生成結果}
+\section{2.5D Video Generation Results}
 \label{sec:exp_video}
 % ─────────────────────────────────────────────────────────────────────────────
 
-\subsection{與原始 Uni3C 的比較}
+\subsection{Comparison with the Original Uni3C}
 
-圖~\ref{fig:exp_uni3c}~比較原始 Uni3C 與 TCP-Uni3C 的生成結果。
-原始 Uni3C 以內建 Depth-Pro 估算的深度驅動，
-由於無法取得準確的深度，生成結果難以預期，
-可能出現幾何扭曲或缺乏空間層次的現象；
-TCP-Uni3C 以精煉深度反投影的點雲引導生成，
-前景主體與背景之間可見明顯的視差位移，
-畫面呈現出真實的空間縱深感。
+Figure~\ref{fig:exp_uni3c} compares the generation results of the original Uni3C and TCP-Uni3C.
+The original Uni3C is driven by the depth estimated with its built-in Depth-Pro;
+since accurate depth cannot be obtained, its generation results are unpredictable
+and may exhibit geometric distortions or a lack of spatial layering.
+TCP-Uni3C guides the generation with the point cloud unprojected from the refined depth;
+a clear parallax displacement is visible between the foreground subject and the background,
+and the frames convey a convincing sense of spatial depth.
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\textwidth]{exp_uni3c}
-  \caption{原始 Uni3C 與 TCP-Uni3C 生成結果比較。
-    共三組畫作，
-    每組最左側為輸入國畫（Input Image，即影片首幀），
-    中間四幀為 TCP-Uni3C 的生成結果，
-    右側四幀為原始 Uni3C 的生成結果。
-    TCP-Uni3C 的影格間呈現平滑的前後景視差變化，並維持原畫的筆墨風格；
-    原始 Uni3C 因深度估算失準，生成結果難以預期，
-    如第三組荷花的影格邊緣即出現原畫中不存在的綠色色塊瑕疵。}
+  \caption{Comparison of the generation results of the original Uni3C and TCP-Uni3C.
+    Three groups of paintings are shown;
+    in each group, the leftmost image is the input TCP (Input Image, i.e., the first frame of the video),
+    the middle four frames are generated by TCP-Uni3C,
+    and the right four frames are generated by the original Uni3C.
+    The frames of TCP-Uni3C exhibit smooth foreground--background parallax changes while preserving the ink-and-brush style of the original painting;
+    the original Uni3C, owing to inaccurate depth estimation, produces unpredictable results---
+    for example, in the third group (the lotus painting), green color-patch artifacts absent from the original painting appear at the frame edges.}
   \label{fig:exp_uni3c}
 \end{figure}
 
-\subsection{相機參數的影響}
+\subsection{Effect of Camera Parameters}
 
-第三章的相機與生成設定涉及多項可調參數：
-初始相機距離的縮放係數、相機的垂直偏移、圓形軌跡的角度振幅，
-以及輸入視訊擴散模型的正負向文字提示。
-本節以荷花畫作為例，自基準設定出發逐項變更參數，
-觀察各參數對生成品質的影響，結果如圖~\ref{fig:exp_failure}~所示。
+The camera and generation settings in Chapter 3 involve several adjustable parameters:
+the scaling factor of the initial camera distance, the vertical offset of the camera, the angular amplitude of the circular trajectory,
+and the positive and negative text prompts fed to the video diffusion model.
+Taking the lotus painting as an example, this section varies each parameter in turn starting from the baseline setting
+to observe its effect on generation quality; the results are shown in Figure~\ref{fig:exp_failure}.
 
-基準設定將相機距離縮放係數設為 $0.85$、垂直偏移設為 $0.01$、
-角度振幅設為 $15^\circ$，
-並採用第三章設計的國畫專屬正負向文字提示，
-生成結果視差平滑且維持原畫風格（圖~\ref{fig:exp_failure}~ TCP-Uni3C）。
-三組對照設定的變更內容與對應結果如下：
+The baseline setting uses a camera-distance scaling factor of $0.85$, a vertical offset of $0.01$,
+and an angular amplitude of $15^\circ$,
+together with the TCP-specific positive and negative text prompts designed in Chapter 3;
+the generated result exhibits smooth parallax and preserves the style of the original painting (Figure~\ref{fig:exp_failure}, TCP-Uni3C).
+The modifications and corresponding results of the three contrast settings are as follows:
 
 \begin{enumerate}
-  \item \textbf{相機距離設定不佳}：
-        將距離縮放係數由 $0.85$ 改為 $1.0$，
-        由於相機距點雲較遠，畫面中缺乏點雲覆蓋的背景比例增加，
-        荷葉等墨色區域出現擴張變形與筆觸細節流失（圖~\ref{fig:exp_failure}~ $\Delta$ Distance）。
-  \item \textbf{角度振幅設定不佳}：
-        振幅改為 $20^\circ$，
-        由於視角偏移過大使破洞面積急遽擴大，
-        生成結果出現明顯的幾何扭曲與內容幻覺，
-        如憑空出現的花瓣與形狀失真的荷葉（圖~\ref{fig:exp_failure}~ $\Delta$ Amplitude）。
-  \item \textbf{文字提示設定}：
-        正向提示改為\textit{``This video features a lotus''}、負向提示留空，
-        與Uni3C中採用類似的設定，
-        由於缺乏「攝影機運動、靜態場景」的語意約束與負向提示的抑制，
-        影格邊緣出現原畫中不存在的彩色條紋與雜訊圖樣（圖~\ref{fig:exp_failure}~ $\Delta$ Test prompt）。
+  \item \textbf{Improper camera distance}:
+        the distance scaling factor is changed from $0.85$ to $1.0$;
+        because the camera is farther from the point cloud, the proportion of background not covered by the point cloud increases,
+        and ink regions such as the lotus leaves exhibit expansion distortion and loss of brushstroke detail (Figure~\ref{fig:exp_failure}, $\Delta$ Distance).
+  \item \textbf{Improper angular amplitude}:
+        the amplitude is changed to $20^\circ$;
+        because the excessive viewpoint shift drastically enlarges the hole area,
+        the generated result shows pronounced geometric distortion and content hallucination,
+        such as petals appearing out of nowhere and misshapen lotus leaves (Figure~\ref{fig:exp_failure}, $\Delta$ Amplitude).
+  \item \textbf{Text prompt setting}:
+        the positive prompt is replaced with \textit{``This video features a lotus''} and the negative prompt is left empty,
+        a configuration similar to that adopted in Uni3C;
+        lacking the semantic constraints of \textit{camera motion} and \textit{static scene} as well as the suppression provided by the negative prompt,
+        colored stripes and noise patterns absent from the original painting appear at the frame edges (Figure~\ref{fig:exp_failure}, $\Delta$ Test prompt).
 \end{enumerate}
 
-上述結果驗證了第三章各項設計決策的必要性：
-縮短相機距離與控制振幅上限，
-可將待填補區域維持在擴散模型能穩定補全的範圍內；
-國畫專屬文字提示則確保填補內容符合靜態場景的語意預期。
+These results validate the necessity of the design decisions made in Chapter 3:
+shortening the camera distance and capping the angular amplitude
+keep the regions to be filled within a range that the diffusion model can complete stably,
+while the TCP-specific text prompts ensure that the filled content conforms to the semantic expectation of a static scene.
 
 % ─────────────────────────────────────────────────────────────────────────────
-\section{討論與限制}
+\section{Discussion and Limitations}
 \label{sec:exp_discussion}
 % ─────────────────────────────────────────────────────────────────────────────
 
-\subsection{適用範圍}
+\subsection{Scope of Applicability}
 
-本研究方法在主體輪廓清晰、物件間界線分明、留白比例適中的水墨國畫上表現最佳，
-例如以單一主體搭配大片留白構圖的花鳥畫。
-此類畫作的筆觸邊界可被 $\mathcal{L}_{\mathrm{brush}}$ 有效辨識，
-留白區域亦能由 $\mathcal{L}_{\mathrm{white}}$ 正確推往遠端，
-配合少量控制點即可重建出符合空間語意的深度場，
-進而生成視差自然的 2.5D 影片。
+The proposed method performs best on ink wash TCPs with clear subject contours, distinct boundaries between objects, and a moderate proportion of white space,
+such as bird-and-flower paintings composed of a single subject against large areas of white space.
+In such paintings, the brushstroke boundaries can be effectively identified by $\mathcal{L}_{\mathrm{brush}}$,
+and the white-space regions can be correctly pushed to the far end by $\mathcal{L}_{\mathrm{white}}$;
+with only a few control points, a depth field consistent with the spatial semantics can be reconstructed,
+which in turn yields a 2.5D video with natural parallax.
 
-\subsection{現有限制}
+\subsection{Limitations}
 
-\textbf{筆觸重疊區域的深度歧義。}
-本研究的人工標注以像素點為單位，每個控制點僅能為單一像素位置指定一個深度值。
-然而水墨畫常以筆觸相互重疊的方式表現多物體交錯的空間關係——
-前後物體的墨色在同一區域內暈染交融，呈現近似半透明的視覺效果。
-此時單一像素實際上同時承載多個物體的深度資訊，
-而本方法缺乏將畫面分解為多個深度圖層（layer）的機制，
-無論控制點指定何值，該區域都只能收斂至單一深度，
-難以獲得具說服力的深度估算結果。
+\textbf{Depth ambiguity in overlapping brushstrokes.}
+The manual annotation in this study operates at the pixel level; each control point can assign only a single depth value to a single pixel location.
+However, ink wash painting often expresses the interleaved spatial relations of multiple objects through overlapping brushstrokes---
+the ink of foreground and background objects merges within the same region through ink wash blending, producing a nearly translucent visual effect.
+In this case, a single pixel actually carries the depth information of multiple objects simultaneously,
+whereas the proposed method lacks a mechanism to decompose the image into multiple depth layers;
+regardless of the value assigned by a control point, such a region can only converge to a single depth,
+making a convincing depth estimate difficult to obtain.
 
-\textbf{大面積填補的生成品質下降。}
-最終影片由視訊擴散模型生成，
-視角偏移後露出的破洞區域與缺乏點雲覆蓋的背景區域均須由模型自行填補。
-當此類待填補範圍過大時，
-點雲提供的幾何約束在畫面中的佔比相對下降，
-生成結果的不確定性隨之升高，
-可能出現與原畫風格不一致的補全內容，導致影片品質不如預期。
+\textbf{Degraded generation quality for large-area filling.}
+The final video is generated by a video diffusion model,
+and both the occlusion holes exposed by viewpoint shifts and the background regions lacking point-cloud coverage must be filled by the model itself.
+When such regions to be filled become too large,
+the proportion of the frame governed by the geometric constraints of the point cloud decreases accordingly,
+the uncertainty of the generated result rises,
+and completions inconsistent with the style of the original painting may appear, degrading the video quality below expectations.
 
-此類無中生有的補全內容，即擴散模型領域所稱的幻覺（hallucination）問題，
-近年已有多項研究對其成因提出解釋。
-Aithal 等人 \cite{diffhallucination} 證明擴散模型會生成完全落在訓練資料分佈支撐集（support）之外的樣本：
-神經網路難以擬合真實但不連續的分數函數（score function），
-其平滑近似使模型在相鄰資料模式（mode）之間內插，
-產生訓練資料中從未出現的內容；
-且此類幻覺樣本伴隨採樣末期變異數的顯著升高，
-與本研究「幾何約束佔比下降導致生成不確定性升高」的觀察相互呼應。
-在條件式生成方面，
-Kim 等人 \cite{structhallucination} 證實當條件影像含有分佈外（out-of-distribution）的局部區域時，
-擴散模型會在對應位置生成捏造的結構性幻覺；
-Wang 等人 \cite{asuka} 亦指出擴散修補（inpainting）模型在填補大面積遮罩時，
-即使有未遮蔽區域作為上下文，仍容易生成與周圍畫面不一致的物件。
-此亦為第三章將相機角度振幅上限控制在 $15^\circ$ 以內的主要原因；
-圖~\ref{fig:exp_failure}~中振幅超過上限與相機距離未縮短的案例，
-即為此現象的具體實例。
+Such fabricated completions correspond to what the diffusion model literature terms the hallucination problem,
+whose causes have been explained by several recent studies.
+Aithal et al.~\cite{diffhallucination} demonstrate that diffusion models can generate samples lying entirely outside the support of the training data distribution:
+neural networks struggle to fit the true but discontinuous score function,
+and their smooth approximation causes the model to interpolate between neighboring data modes,
+producing content that never appears in the training data;
+moreover, such hallucinated samples are accompanied by a marked increase in variance during the final stage of sampling,
+echoing our observation that a reduced proportion of geometric constraints raises generation uncertainty.
+Regarding conditional generation,
+Kim et al.~\cite{structhallucination} confirm that when the conditioning image contains out-of-distribution (OOD) local regions,
+diffusion models generate fabricated structural hallucinations at the corresponding locations;
+Wang et al.~\cite{asuka} likewise point out that when diffusion inpainting models fill large-area masks,
+they tend to generate objects inconsistent with the surrounding image even when the unmasked regions serve as context.
+This is also the main reason why Chapter 3 caps the angular amplitude of the camera trajectory at $15^\circ$;
+the cases in Figure~\ref{fig:exp_failure} where the amplitude exceeds the cap or the camera distance is not shortened
+are concrete instances of this phenomenon.
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\textwidth]{exp_failure}
-  \caption{相機參數與文字提示設定不當的失敗案例分析。
-    最左側為輸入國畫，右側每列為一種設定下影片的四個取樣影格，
-    由上至下依序為：
-    TCP-Uni3C（距離縮放 $0.85$、垂直偏移 $0.01$、振幅 $15^\circ$、國畫專屬文字提示）、
-    $\Delta$ Distance（縮放係數 $1.0$，相機距點雲過遠）、
-    $\Delta$ Amplitude（振幅 $20^\circ$，超過上限）、
-    $\Delta$ Test prompt（通用文字提示且無負向提示）。
-    基準設定生成品質穩定；
-    後三列分別呈現墨色區域擴張變形、
-    幾何扭曲與內容幻覺，
-    以及影格邊緣的彩色條紋瑕疵。}
+  \caption{Failure case analysis of improper camera parameter and text prompt settings.
+    The leftmost image is the input TCP; each row on the right shows four sampled frames of the video under one setting,
+    from top to bottom:
+    TCP-Uni3C (distance scaling $0.85$, vertical offset $0.01$, amplitude $15^\circ$, TCP-specific text prompts),
+    $\Delta$ Distance (scaling factor $1.0$, camera too far from the point cloud),
+    $\Delta$ Amplitude (amplitude $20^\circ$, exceeding the cap),
+    $\Delta$ Test prompt (generic text prompt without a negative prompt).
+    The baseline setting produces stable generation quality;
+    the last three rows respectively exhibit expansion distortion of ink regions,
+    geometric distortion with content hallucination,
+    and colored stripe artifacts at the frame edges.}
   \label{fig:exp_failure}
 \end{figure}

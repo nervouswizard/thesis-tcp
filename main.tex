@@ -48,6 +48,7 @@
 %%\fi
       \usepackage[pdftex]{graphicx}
       \newcommand\myworkflow{pdftex}  % set the flag
+\usepackage{pdfpages}  % embed the signed Certificate of Approval as page 2 (must load after graphicx)
 
 % 增強功能型頁楣 / 頁腳套件
 \usepackage{fancyhdr}  % 借用此套件來擺放浮水印
@@ -224,23 +225,23 @@ commentstyle=\upshape,% 預設是斜體字，會影響註解裏的英文，改�
 % 如果不需要以中文數字一、二、三呈現章別，例如「第一章」
 % 則請把下列介於 >>> 與 <<< 之間
 % 的文字行關掉 (行首加上百分號), 會以「第 1 章」呈現
-%% 中文數字章別 >>>
-\renewcommand\countermapping[1]{\CJKnumber{#1}}
-\renewcommand\tocprechaptername{第}
-\renewcommand\tocpostchaptername{章}
-\setlength{\tocChNumberWidth}{2.5em}
-\makeatletter
-\def\@makechapterhead#1{%
-  {\parindent \z@ \centering \normalfont
-    \ifnum \c@secnumdepth >\m@ne
-        \LARGE\bfseries \prechaptername\countermapping{\thechapter}\postchaptername
-    \fi
-    \hspace{1em}
-    \interlinepenalty\@M
-    \LARGE \bfseries #1\par\nobreak
-    \vskip 20\p@
-  }}
-\makeatother
+%% 中文數字章別 >>> (英文版關閉：章別以「Chapter 1」呈現)
+%\renewcommand\countermapping[1]{\CJKnumber{#1}}
+%\renewcommand\tocprechaptername{第}
+%\renewcommand\tocpostchaptername{章}
+%\setlength{\tocChNumberWidth}{2.5em}
+%\makeatletter
+%\def\@makechapterhead#1{%
+%  {\parindent \z@ \centering \normalfont
+%    \ifnum \c@secnumdepth >\m@ne
+%        \LARGE\bfseries \prechaptername\countermapping{\thechapter}\postchaptername
+%    \fi
+%    \hspace{1em}
+%    \interlinepenalty\@M
+%    \LARGE \bfseries #1\par\nobreak
+%    \vskip 20\p@
+%  }}
+%\makeatother
 %% <<< 中文數字章別
 
 %%% 以下是載入前頁、本文、後頁

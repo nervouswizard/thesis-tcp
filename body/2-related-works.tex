@@ -1,182 +1,182 @@
 % !TEX root = ../main.tex
 \hspace{24pt}
 
-本章回顧與本研究密切相關的四類技術：
-（一）擴散模型，
-（二）基於擴散模型的單目深度估算，
-（三）單張圖像的三維場景重建與生成，
-（四）基於擴散模型的新視角合成與視訊生成。
+This chapter reviews four categories of techniques closely related to this study:
+(1) diffusion models,
+(2) diffusion-based monocular depth estimation,
+(3) single-image 3D scene reconstruction and generation,
+and (4) diffusion-based novel view synthesis and video generation.
 
-\section{擴散模型}
+\section{Diffusion Models}
 
-擴散模型（diffusion model）是近年來生成式模型的重要突破，
-其核心思想源自非平衡熱力學的擴散過程。
-Ho 等人提出的去噪擴散機率模型（Denoising Diffusion Probabilistic Models，DDPM）\cite{ddpm}
-以馬可夫鏈（Ｍarkov chain）定義前向加噪過程（forward process），
-逐步將資料分佈轉換為高斯雜訊（Gaussian noise），
-並訓練神經網路（neural network）學習反向去噪過程（reverse process），
-從純雜訊出發逐步恢復真實樣本，如圖~\ref{fig:ddpmrw}~所示。
-DDPM 在影像生成品質上大幅超越了當時的生成對抗網路（Generative Adversarial Network，GAN），
-奠定了擴散模型作為主流生成架構的地位。
+The diffusion model represents a major recent breakthrough in generative modeling,
+whose core idea originates from the diffusion process in non-equilibrium thermodynamics.
+Denoising Diffusion Probabilistic Models (DDPM), proposed by Ho et al. \cite{ddpm},
+define the forward noising process as a Markov chain
+that gradually transforms the data distribution into Gaussian noise,
+and train a neural network to learn the reverse denoising process,
+which starts from pure noise and progressively recovers real samples, as illustrated in Figure~\ref{fig:ddpmrw}.
+DDPM substantially surpassed the contemporaneous Generative Adversarial Network (GAN) in image generation quality,
+establishing diffusion models as the dominant generative architecture.
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=0.9\linewidth]{DDPM.png}
-  \caption{DDPM 前向加噪與反向去噪流程示意圖。虛線箭頭為前向過程，
-  逐步將真實資料 $x_0$ 加入高斯雜訊至純雜訊 $x_T$；
-  實線箭頭為反向過程，神經網路學習從 $x_T$ 逐步去噪還原 $x_0$。}
+  \caption{Illustration of the DDPM forward noising and reverse denoising processes. The dashed arrows denote the forward process,
+  which gradually adds Gaussian noise to the real data $x_0$ until pure noise $x_T$ is reached;
+  the solid arrows denote the reverse process, in which a neural network learns to progressively denoise $x_T$ back to $x_0$.}
   \label{fig:ddpmrw}
 \end{figure}
 
-然而 DDPM 的馬可夫鏈採樣過程需要數百至數千個去噪步驟才能生成高品質樣本，
-推論速度緩慢導致難以應用於實際場景。
-Song 等人提出去噪擴散隱式模型（Denoising Diffusion Implicit Models，DDIM）\cite{ddim}，
-以非馬可夫鏈（non-Markovian）過程重新定義反向採樣步驟：
-DDIM 的前向過程與 DDPM 具有相同的邊際分佈（marginal distribution），
-因此可直接復用 DDPM 的訓練結果，
-但其反向採樣採用確定性（deterministic）公式，
-允許在僅使用數十個步驟的情況下完成高品質生成，
-推論速度提升可達 10 至 50 倍，如圖~\ref{fig:ddimrw}~所示。
-此外 DDIM 的確定性採樣使得潛在空間插值與反轉（inversion）成為可能，
-為後續以擴散模型進行影像編輯、深度估算與視訊生成的研究（包含本研究採用的 Marigold-DC）提供了關鍵技術基礎。
+However, the Markov-chain sampling procedure of DDPM requires hundreds to thousands of denoising steps to generate high-quality samples,
+and the resulting slow inference makes it difficult to apply in practical scenarios.
+Song et al. proposed Denoising Diffusion Implicit Models (DDIM) \cite{ddim},
+which redefine the reverse sampling steps as a non-Markovian process:
+the forward process of DDIM shares the same marginal distributions as that of DDPM,
+so the training results of DDPM can be reused directly,
+while its reverse sampling adopts a deterministic formulation
+that enables high-quality generation with only a few dozen steps,
+accelerating inference by a factor of 10 to 50, as illustrated in Figure~\ref{fig:ddimrw}.
+Moreover, the deterministic sampling of DDIM makes latent-space interpolation and inversion possible,
+providing a key technical foundation for subsequent research on diffusion-based image editing, depth estimation, and video generation (including Marigold-DC adopted in this study).
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=0.85\linewidth]{DDIM.png}
-  \caption{DDIM 示意圖：DDIM 以非馬可夫確定性公式對反向採樣直接跨步推算，
-  大幅提升推論（inference）速度。}
+  \caption{Illustration of DDIM: DDIM performs reverse sampling with a non-Markovian deterministic formulation that steps directly across timesteps,
+  greatly accelerating inference.}
   \label{fig:ddimrw}
 \end{figure}
 
-儘管透過 DDIM 可以提升模型運算速度，
-但在像素空間（pixel space）對高解析度圖片的計算成本極高。
-Rombach 等人提出潛在擴散模型（Latent Diffusion Models，LDM）\cite{ldm}，
-先以自動編碼器（autoencoder）將圖片壓縮至低維潛在空間（latent space），
-再於潛在空間執行擴散過程，推論完成後由解碼器（decoder）還原回像素空間，
-大幅降低訓練與推論的計算負擔，如圖~\ref{fig:ldmrw}~所示。
-LDM 以文字條件化（text-conditioning）結合大規模圖文資料集 LAION-5B \cite{LAION-5B} 訓練後，
-即為廣泛使用的 Stable Diffusion 模型，
-其積累的豐富視覺語意先驗成為後續眾多下游任務
-（包含深度估算、新視角合成、視訊生成）的重要基礎，
-本研究所採用的 Marigold \cite{marigold}、Marigold-DC \cite{marigolddc}、%
-Depth Anything V3 \cite{depthanything} 與 Uni3C \cite{uni3c} 均建構於此基礎 \cite{ldm} 之上。
+Although DDIM improves the computational speed of the model,
+the computational cost of operating on high-resolution images in pixel space remains extremely high.
+Rombach et al. proposed Latent Diffusion Models (LDM) \cite{ldm},
+which first compress an image into a low-dimensional latent space with an autoencoder,
+then perform the diffusion process in the latent space, and finally restore the result to pixel space with a decoder after inference,
+substantially reducing the computational burden of training and inference, as illustrated in Figure~\ref{fig:ldmrw}.
+When trained with text-conditioning on the large-scale image--text dataset LAION-5B \cite{LAION-5B},
+LDM becomes the widely used Stable Diffusion model,
+whose rich accumulated visual semantic priors form an important foundation for numerous downstream tasks
+(including depth estimation, novel view synthesis, and video generation);
+Marigold \cite{marigold}, Marigold-DC \cite{marigolddc}, %
+Depth Anything V3 \cite{depthanything}, and Uni3C \cite{uni3c} adopted in this study are all built upon this foundation \cite{ldm}.
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=0.9\linewidth]{LDM.png}
-  \caption{LDM 架構示意圖。輸入圖片經 Encoder 壓縮至低維潛在空間後，擴散與去噪過程在潛在空間中進行，最終由 Decoder 還原至像素空間，大幅減少直接在像素空間操作的計算成本。條件訊號（文字、圖片等）透過 Cross-Attention 注入去噪網路。}
+  \caption{Illustration of the LDM architecture. The input image is compressed into a low-dimensional latent space by the encoder, the diffusion and denoising processes are performed in the latent space, and the decoder finally restores the result to pixel space, greatly reducing the computational cost of operating directly in pixel space. Conditioning signals (text, images, etc.) are injected into the denoising network via cross-attention.}
   \label{fig:ldmrw}
 \end{figure}
 
-\section{基於擴散模型的單目深度估算}
+\section{Diffusion-Based Monocular Depth Estimation}
 
-單目深度估算（monocular depth estimation）以單張圖片為輸入，
-預測每個像素的相對或絕對深度值。
-然而單張圖片本質上缺乏視差資訊（disparity），
-相同的二維圖像可對應無限多種三維場景配置，
-即所謂的深度不確定性（depth ambiguity）問題。
-相機在拍攝時將三維世界投影至二維平面，
-此過程不可逆——物體的遠近、大小與遮擋關係無法僅從一張圖片直接恢復。
-在輸入只有一張圖片的情況下，
-模型只能依賴在訓練資料中學習到的幾何先驗知識（geometric prior）
-與場景統計規律（scene statistics）來推斷深度。
-這種不確定性（ill-posed nature）使單目深度估算至今仍是電腦視覺的核心挑戰之一，
-且對訓練資料的場景分佈高度敏感——
-在特定場景下表現良好的模型，往往難以泛化（generalize）至風格差異顯著的新場景（domain）。
+Monocular depth estimation takes a single image as input
+and predicts the relative or absolute depth value of every pixel.
+However, a single image inherently lacks disparity information,
+and the same 2D image can correspond to infinitely many 3D scene configurations,
+which is known as the depth-ambiguity problem.
+When capturing a photograph, the camera projects the 3D world onto a 2D plane;
+this process is irreversible---the distance, size, and occlusion relations of objects cannot be recovered directly from a single image.
+With only one image as input,
+a model can rely solely on the geometric priors
+and scene statistics learned from its training data to infer depth.
+This ill-posed nature keeps monocular depth estimation one of the core challenges in computer vision to this day,
+and makes it highly sensitive to the scene distribution of the training data---
+a model that performs well in specific scenes often struggles to generalize to new domains with markedly different styles.
 
-早期監督式方法（如 DPT \cite{dpt}、AdaBins \cite{adabins} 等）以 NYU Depth \cite{nyudepth}、KITTI \cite{kitti} 等真實場景照片為訓練資料，
-在受控場景中取得了優秀的性能，
-但因訓練資料與國畫的視覺特徵存在根本性差距，
-難以在留白與筆觸主導的畫面中產生可靠的估算結果，
-且國畫專用深度資料集極為稀缺，無法對現有模型進行有效的訓練。
+Early supervised methods (e.g., DPT \cite{dpt} and AdaBins \cite{adabins}) were trained on real-scene photographs such as NYU Depth \cite{nyudepth} and KITTI \cite{kitti},
+achieving excellent performance in controlled scenes,
+but the fundamental gap between their training data and the visual characteristics of TCP
+makes it difficult for them to produce reliable estimates for images dominated by white space and brushstrokes,
+and TCP-specific depth datasets are extremely scarce, precluding effective training of existing models.
 
-Marigold \cite{marigold} 開創了將擴散模型應用於深度估算的新範式。
-其核心思想是以預訓練的文字轉圖像潛在擴散模型（Stable Diffusion v2）\cite{ldm} 為起點，
-直接繼承其在大規模圖文資料集 LAION-5B \cite{LAION-5B} 上學習到的豐富視覺先驗知識，
-以去噪過程取代傳統的監督式回歸。
-相較於從頭訓練需要大規模真實場景深度標注資料集的監督式方法，
-Marigold 僅需以少量合成場景深度資料（Hypersim、Virtual KITTI）進行微調，
-即可借助預訓練階段積累的跨場景視覺先驗，
-對任意輸入圖片生成仿射不變深度圖（affine-invariant depth map），
-其微調架構如圖~\ref{fig:marigoldrw}~所示。
-所謂仿射不變，是指預測值 $\hat{D}$ 與實際深度值 $D^*$ 之間
-存在未知的縮放（scale）與平移（shift）關係：
-$\hat{D} = s \cdot D^* + b$（$s, b$ 未知），
-模型僅能保證像素間的相對深度大小關係，無法直接輸出以公尺為單位的絕對深度值。
-憑藉擴散模型積累的豐富視覺先驗，Marigold 在跨域場景上的零樣本泛化能力（zero-shot generalization）優於監督式方法。
-然而原始 Marigold 僅能輸出仿射不變的相對深度，
-且推論階段不提供外部深度約束的注入介面，
-一旦估算結果出現偏差，使用者缺乏針對性的修正手段。
+Marigold \cite{marigold} pioneered a new paradigm of applying diffusion models to depth estimation.
+Its core idea is to start from a pretrained text-to-image latent diffusion model (Stable Diffusion v2) \cite{ldm},
+directly inheriting the rich visual priors learned on the large-scale image--text dataset LAION-5B \cite{LAION-5B},
+and to replace conventional supervised regression with a denoising process.
+Compared with supervised methods that require large-scale real-scene depth-annotated datasets for training from scratch,
+Marigold only requires fine-tuning on a small amount of synthetic-scene depth data (Hypersim and Virtual KITTI)
+to exploit the cross-scene visual priors accumulated during pretraining
+and generate an affine-invariant depth map for an arbitrary input image;
+its fine-tuning architecture is shown in Figure~\ref{fig:marigoldrw}.
+Affine invariance means that the prediction $\hat{D}$ and the actual depth $D^*$
+are related by an unknown scale and shift:
+$\hat{D} = s \cdot D^* + b$ (with $s, b$ unknown),
+so the model only guarantees the relative depth ordering among pixels and cannot directly output absolute depth values in meters.
+Owing to the rich visual priors accumulated by the diffusion model, Marigold achieves better zero-shot generalization across domains than supervised methods.
+However, the original Marigold outputs only affine-invariant relative depth
+and provides no interface for injecting external depth constraints at inference time;
+once the estimate deviates, the user has no targeted means of correction.
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=0.9\linewidth]{marigold_pipeline.png}
-  \caption{Marigold fine-tuning 流程示意圖。
-  上方路徑：RGB 圖片 $\mathbf{x}$ 經凍結的潛在編碼器壓縮為條件編碼 $\mathbf{z}^{(\mathbf{x})}$。
-  中間路徑：深度圖 $\mathbf{d}$ 同樣經凍結編碼器壓縮後，
-  與採樣雜訊 $\boldsymbol{\epsilon}$ 依時間步 $t$ 疊加，得到帶噪深度潛在向量 $\mathbf{z}_t^{(\mathbf{d})}$。
-  兩條路徑的潛在向量拼接後輸入 U-Net，預測雜訊 $\hat{\boldsymbol{\epsilon}}$，
-  訓練目標為最小化 $\|\boldsymbol{\epsilon} - \hat{\boldsymbol{\epsilon}}\|^2$。}
+  \caption{Illustration of the Marigold fine-tuning pipeline.
+  Top path: the RGB image $\mathbf{x}$ is compressed by the frozen latent encoder into the conditioning code $\mathbf{z}^{(\mathbf{x})}$.
+  Middle path: the depth map $\mathbf{d}$ is likewise compressed by the frozen encoder,
+  then combined with sampled noise $\boldsymbol{\epsilon}$ according to the timestep $t$ to obtain the noisy depth latent $\mathbf{z}_t^{(\mathbf{d})}$.
+  The latents of the two paths are concatenated and fed into the U-Net to predict the noise $\hat{\boldsymbol{\epsilon}}$,
+  and the training objective is to minimize $\|\boldsymbol{\epsilon} - \hat{\boldsymbol{\epsilon}}\|^2$.}
   \label{fig:marigoldrw}
 \end{figure}
 
-Depth Anything V3 \cite{depthanything} 以大規模多樣化資料訓練，
-整合多視角幾何一致性監督，
-在零樣本泛化能力與公制深度精度上均取得顯著進步，
-對多種影像風格具有較強的適應性，
-其架構如圖~\ref{fig:da3rw}~所示。
-但與監督式方法相同，其架構不提供稀疏深度引導介面，
-在推論階段無法接受使用者指定的局部深度修正。
+Depth Anything V3 \cite{depthanything} is trained on large-scale diverse data
+and integrates multi-view geometric consistency supervision,
+achieving significant improvements in both zero-shot generalization and metric depth accuracy
+and exhibiting strong adaptability to a wide range of image styles;
+its architecture is shown in Figure~\ref{fig:da3rw}.
+However, like the supervised methods, its architecture provides no sparse depth guidance interface
+and cannot accept user-specified local depth corrections at inference time.
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=0.85\linewidth]{da3_pipeline.png}
-  \caption{Depth Anything V3 架構示意圖。
-  輸入影像經 Image Patch Embed 後進入以 Vanilla DINOv2 \cite{dinov2} 為骨幹的 Single Transformer，
-  再透過 Dual-DPT Head 同時輸出真實深度圖（Depth）、射線方向（Ray）與三維點座標（Points），
-  並可選擇性地加入相機內參 token（Camera）以提升估算精度。}
+  \caption{Illustration of the Depth Anything V3 architecture.
+  The input image passes through Image Patch Embed into a Single Transformer built on a Vanilla DINOv2 \cite{dinov2} backbone,
+  and a Dual-DPT Head then simultaneously outputs the depth map (Depth), the ray directions (Ray), and the 3D point coordinates (Points),
+  with an optional camera-intrinsics token (Camera) to improve estimation accuracy.}
   \label{fig:da3rw}
 \end{figure}
 
 \begin{figure}
   \centering
   \includegraphics[width=0.9\textwidth]{marigoldDC_pipeline}
-  \caption{Marigold-DC 引導推論流程。
-  上半部：推論路徑，RGB 圖像 $\mathbf{x}$ 經潛在編碼器得 $\mathbf{z}^{(\mathbf{x})}$，
-  深度潛在向量 $\mathbf{z}_t^{(\mathbf{d})}$ 與其拼接後送入 U-Net 去噪，
-  完成所有去噪步驟後得到乾淨潛在特徵 $\mathbf{z}_0^{(\mathbf{d})}$，
-  再經 VAE 解碼器 $\mathcal{D}(\cdot)$ 解碼為仿射不變深度圖 $\hat{\mathbf{d}}^{(m)}$。
-  下半部：稀疏引導路徑，每個去噪步驟中以 Tweedie 公式預估當前深度中間值
-  $\hat{\mathbf{d}}_t^{(m)}$，計算其與稀疏控制點 $\mathbf{c}$ 之損失 $\mathcal{L}$，
-  並反向傳播至潛在向量以施加幾何約束。
-  綠色鎖頭表示凍結的預訓練參數；火焰符號表示可學習的尺度與偏移（$\hat{a}, \hat{b}$）。}
+  \caption{The guided inference pipeline of Marigold-DC.
+  Top half: the inference path, in which the RGB image $\mathbf{x}$ is encoded by the latent encoder into $\mathbf{z}^{(\mathbf{x})}$,
+  the depth latent $\mathbf{z}_t^{(\mathbf{d})}$ is concatenated with it and fed into the U-Net for denoising,
+  the clean latent feature $\mathbf{z}_0^{(\mathbf{d})}$ is obtained after all denoising steps are completed,
+  and the VAE decoder $\mathcal{D}(\cdot)$ then decodes it into the affine-invariant depth map $\hat{\mathbf{d}}^{(m)}$.
+  Bottom half: the sparse guidance path, in which the Tweedie formula estimates the current intermediate depth
+  $\hat{\mathbf{d}}_t^{(m)}$ at each denoising step, its loss $\mathcal{L}$ with respect to the sparse control points $\mathbf{c}$ is computed,
+  and the gradient is backpropagated to the latent to impose geometric constraints.
+  Green locks denote frozen pretrained parameters; the flame symbol denotes the learnable scale and shift ($\hat{a}, \hat{b}$).}
   \label{fig:marigolddc}
 \end{figure}
 
-Marigold-DC \cite{marigolddc} 在 Marigold 基礎上引入稀疏深度引導機制（sparse depth completion）。
-使用者僅需提供少量像素位置的深度數值作為控制點，
-模型即可在去噪迭代過程中以這些稀疏約束引導整體深度場的生成，
-在不重新訓練的前提下，將零樣本估算結果修正至符合使用者意圖的方向。
-此機制對於訓練資料稀缺且需要局部干預修正的場景（如國畫深度估算）尤為關鍵，
-是本研究選定其為深度估算骨幹的核心原因。
-然而 Marigold-DC 是針對真實場景照片設計，其損失函數僅包含幾何準確性約束。
-而若是考量到國畫特有的留白語意、筆觸結構與抽象空間表達，
-直接套用於國畫深度估算時容易產生不符畫意的深度分布。
-此外如何有系統地引導使用者決定控制點的位置與深度數值，亦是實際應用的重要課題。
-本研究針對上述問題提出改進方案，控制點標注流程詳見第~\ref{subsec:dc}~節，損失函數設計詳見第~\ref{subsec:loss}~節。
-Marigold-DC 的稀疏引導流程如圖~\ref{fig:marigolddc}~所示。
+Marigold-DC \cite{marigolddc} introduces a sparse depth guidance mechanism (sparse depth completion) on top of Marigold.
+The user only needs to provide depth values at a small number of pixel positions as control points,
+and the model uses these sparse constraints to guide the generation of the entire depth field during the denoising iterations,
+steering the zero-shot estimate toward the user's intent without any retraining.
+This mechanism is particularly critical for scenarios where training data are scarce and local corrective intervention is required (such as TCP depth estimation),
+and is the core reason this study selects it as the depth estimation backbone.
+However, Marigold-DC is designed for real-scene photographs, and its loss function contains only a geometric-accuracy constraint.
+When the whitespace semantics, brushstroke structure, and abstract spatial expression unique to TCP are taken into account,
+directly applying it to TCP depth estimation tends to produce depth distributions inconsistent with the painting's intent.
+Moreover, how to systematically guide users in deciding the positions and depth values of the control points is also an important issue in practical applications.
+This study proposes improvements for these problems: the control-point annotation procedure is detailed in Section~\ref{subsec:dc}, and the loss function design is detailed in Section~\ref{subsec:loss}.
+The sparse guidance pipeline of Marigold-DC is illustrated in Figure~\ref{fig:marigolddc}.
 
-\section{單張圖像的三維場景重建與生成}
+\section{Single-Image 3D Scene Reconstruction and Generation}
 
-從單張圖像重建或生成三維場景是電腦視覺的長期挑戰。
-近年來擴散模型的發展顯著推進了此方向的研究進展。
+Reconstructing or generating a 3D scene from a single image is a long-standing challenge in computer vision.
+Recent developments in diffusion models have significantly advanced research in this direction.
 
-Zero-1-to-3 \cite{zero123} 以單張物件圖片為輸入，
-透過視角條件化的擴散模型生成任意視角下的新視角圖片，
-實現零樣本（zero-shot）的單圖像三維物件合成，
-如圖~\ref{fig:zero123rw}~所示。
-其方法驗證了擴散模型在三維理解上的潛力，
-但主要針對單一物件，難以直接拓展至複雜背景的場景級任務，
+Zero-1-to-3 \cite{zero123} takes a single object image as input
+and generates novel-view images at arbitrary viewpoints through a viewpoint-conditioned diffusion model,
+achieving zero-shot single-image 3D object synthesis,
+as illustrated in Figure~\ref{fig:zero123rw}.
+The method demonstrates the potential of diffusion models for 3D understanding,
+but it primarily targets individual objects and is difficult to extend directly to scene-level tasks with complex backgrounds.
 
 \begin{figure}[htbp]
   \centering
@@ -189,143 +189,143 @@ Zero-1-to-3 \cite{zero123} 以單張物件圖片為輸入，
     \centering
     \includegraphics[height=5cm]{zero123_2.png}
   \end{minipage}
-  \caption{Zero-1-to-3 示意圖。（左）視角條件化擴散模型架構：以輸入圖片與相對視角偏移量（$\Delta R, \Delta T$）為條件，生成目標視角下的圖片；（右）多視角合成結果：由單張輸入圖片生成連續旋轉視角的新視角圖片序列。}
+  \caption{Illustration of Zero-1-to-3. (Left) The viewpoint-conditioned diffusion model architecture, which generates the image at the target viewpoint conditioned on the input image and the relative viewpoint offset ($\Delta R, \Delta T$); (right) multi-view synthesis results, in which a sequence of novel-view images under continuously rotating viewpoints is generated from a single input image.}
   \label{fig:zero123rw}
 \end{figure}
 
-Difix3D+ \cite{difix3d} 提出以單步擴散模型修復三維重建中的幾何瑕疵，
-針對 NeRF、3DGS 等重建方法在資料不完整或遮擋情況下產生的浮點雜訊與空洞進行後處理，
-在不重新訓練的情況下提升重建品質，如圖~\ref{fig:difix3drw}~所示。
+Difix3D+ \cite{difix3d} proposes repairing geometric artifacts in 3D reconstruction with a single-step diffusion model,
+post-processing the floater noise and holes produced by reconstruction methods such as NeRF and 3DGS under incomplete data or occlusion,
+thereby improving reconstruction quality without retraining, as illustrated in Figure~\ref{fig:difix3drw}.
 
-WonderWorld \cite{wonderworld} 以單張圖片為輸入，
-結合深度估算與高斯噴濺（Gaussian Splatting）技術，
-支援使用者以互動方式探索並拓展三維場景，
-生成具有視差感的沉浸式場景表示。
-其工作顯示深度估算與場景生成的緊密結合是實現互動式三維展示的可行路徑，如圖~\ref{fig:wonderworldrw}~所示。
+WonderWorld \cite{wonderworld} takes a single image as input
+and combines depth estimation with Gaussian Splatting
+to let users interactively explore and extend 3D scenes,
+generating an immersive scene representation with a sense of parallax.
+This work shows that the tight integration of depth estimation and scene generation is a feasible path toward interactive 3D presentation, as illustrated in Figure~\ref{fig:wonderworldrw}.
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=0.9\linewidth]{Difix3Dplus.png}
-  \caption{Difix3D+ 修復流程示意圖。針對 NeRF 或 3DGS 重建後殘留的浮點雜訊與空洞區域，以單步擴散模型進行後處理修復，在不重新訓練重建模型的前提下提升幾何品質。}
+  \caption{Illustration of the Difix3D+ repair pipeline. The floater noise and hole regions remaining after NeRF or 3DGS reconstruction are post-processed and repaired by a single-step diffusion model, improving geometric quality without retraining the reconstruction model.}
   \label{fig:difix3drw}
 \end{figure}
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=0.9\linewidth]{wonderworld.png}
-  \caption{WonderWorld 互動式場景拓展示意圖。以單張輸入圖片為起點，結合深度估算與高斯噴濺技術，使用者可互動式地探索並向外延伸三維場景，生成具有視差感的沉浸式場景表示。}
+  \caption{Illustration of interactive scene extension in WonderWorld. Starting from a single input image and combining depth estimation with Gaussian Splatting, the user can interactively explore and extend the 3D scene outward, generating an immersive scene representation with a sense of parallax.}
   \label{fig:wonderworldrw}
 \end{figure}
 
-Fu 等人 \cite{highreliefbrush} 首次提出從單張水墨畫生成高浮雕（high-relief）三維模型的方法，
-是專門針對國畫進行 2.5D 幾何重建的早期代表性工作。
-其核心思想是將水墨畫視為大量半透明筆觸的疊合，
-透過保留每個筆觸的顏色、紋理與筆劃形狀等訊息，最大化維持原畫的藝術風格。
-為此其方法結合層分解（layer decomposition）與筆觸分割（brushstroke segmentation），
-藉以推斷浮雕合成時的遮擋關係並保留浮雕表面的筆觸壓力，
-忠實提取畫作上的每一個筆觸；
-最後再透過互動式介面手動調整各筆觸的膨脹程度（inflation），
-搭配位移映射（displacement map）完成高浮雕的呈現，如圖~\ref{fig:highreliefrw}~所示。
-然而此方法在實際應用上仍高度依賴人工介入：
-層分解採用基於 RGB 幾何空間凸包假設的最佳化演算法，
-使用者需手動指定調色盤顏色的數量與順序，不當設定易導致顏色失真；
-以單一筆觸為切割單位雖能忠實保留畫作風格，
-卻使後續在三維空間中組合筆觸時需考量更多排列順序，增加手動處理負擔；
-浮雕生成階段亦需使用者以箭頭逐一標記各筆觸區域的坡度與曲率，
-整體流程依賴大量手動操作，難以推廣至複雜畫作。
-本研究以擴散模型的視覺先驗取代規則式幾何假設，
-以稀疏深度控制點取代逐筆觸手動標記，
-在大幅降低標注負擔的前提下，使深度估算結果符合畫意空間語意與使用者意圖。
+Fu et al. \cite{highreliefbrush} first proposed a method for generating a high-relief 3D model from a single ink wash painting,
+an early representative work dedicated to 2.5D geometric reconstruction of TCP.
+Its core idea is to regard an ink wash painting as the superposition of a large number of semi-transparent brushstrokes,
+preserving the color, texture, and stroke shape of every brushstroke to maximally retain the artistic style of the original painting.
+To this end, the method combines layer decomposition with brushstroke segmentation
+to infer the occlusion relations during relief composition and to preserve the stroke pressure on the relief surface,
+faithfully extracting every brushstroke of the painting;
+finally, an interactive interface is used to manually adjust the inflation of each brushstroke,
+which, together with a displacement map, completes the high-relief presentation, as illustrated in Figure~\ref{fig:highreliefrw}.
+In practice, however, this method remains highly dependent on manual intervention:
+the layer decomposition adopts an optimization algorithm based on a convex-hull assumption in RGB geometric space,
+requiring the user to manually specify the number and order of the palette colors, where improper settings easily lead to color distortion;
+segmenting at the granularity of individual brushstrokes faithfully preserves the painting style,
+yet forces the subsequent composition of brushstrokes in 3D space to consider far more orderings, increasing the manual workload;
+the relief generation stage further requires the user to mark the slope and curvature of each brushstroke region one by one with arrows,
+so the overall workflow relies on extensive manual operations and is difficult to generalize to complex paintings.
+This study replaces rule-based geometric assumptions with the visual priors of diffusion models
+and replaces per-brushstroke manual marking with sparse depth control points,
+so that the depth estimates conform to the painting's spatial semantics and the user's intent while greatly reducing the annotation burden.
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=0.9\linewidth]{high_relief.png}
-  \caption{High Relief from Brush Painting 系統架構示意圖 \cite{highreliefbrush}。
-  輸入水墨畫經層分解與筆觸分割後，對各個筆觸施以膨脹（inflation）與位移映射（displacement map），
-  最終合併為帶有紋理的 2.5D 高浮雕模型。}
+  \caption{Illustration of the High Relief from Brush Painting system architecture \cite{highreliefbrush}.
+  The input ink wash painting undergoes layer decomposition and brushstroke segmentation, inflation and a displacement map are applied to each brushstroke,
+  and the results are finally merged into a textured 2.5D high-relief model.}
   \label{fig:highreliefrw}
 \end{figure}
 
-Zero-1-to-3 \cite{zero123}、Difix3D+ \cite{difix3d} 與 WonderWorld \cite{wonderworld} 均以真實場景照片或合成三維物件
-為主要訓練與評估對象，不適合直接應用於國畫：
-Zero-1-to-3 以單一物件為中心，國畫場景不具備可提取的物件級幾何結構；
-Difix3D+ 依賴既有三維重建輸出，而國畫缺乏足夠的多視角資料支持重建流程；
-WonderWorld 雖使用深度估算驅動場景擴展，但其深度模組以真實照片為訓練基礎，
-對留白構圖與抽象筆觸的空間語意理解有限，深度估算誤差將直接影響後續場景品質。
-此外上述三項方法均未提供使用者干預深度估算的方式，
-一旦模型在國畫上產生誤判，無法針對性地進行局部修正。
-本研究針對上述困境，以 Marigold-DC 為基礎，
-引入人機協作（human-in-the-loop）的稀疏深度控制點標注機制，
-並結合專為國畫設計的 \textit{ChinesePaintingLoss}，
-使深度估算結果既符合畫面的視覺語意，又保留使用者對關鍵區域的主動調控能力，
-從而在真實三維資料極度稀缺的條件下，仍能生成具有說服力的 2.5D 影片。
+Zero-1-to-3 \cite{zero123}, Difix3D+ \cite{difix3d}, and WonderWorld \cite{wonderworld} all take real-scene photographs or synthetic 3D objects
+as their primary training and evaluation targets and are unsuitable for direct application to TCP:
+Zero-1-to-3 is centered on individual objects, whereas TCP scenes possess no extractable object-level geometric structure;
+Difix3D+ relies on the output of an existing 3D reconstruction, whereas TCP lacks sufficient multi-view data to support a reconstruction pipeline;
+WonderWorld drives scene extension with depth estimation, but its depth module is trained on real photographs,
+with limited understanding of the spatial semantics of whitespace composition and abstract brushstrokes, and its depth estimation errors directly degrade the quality of the subsequent scenes.
+Moreover, none of these three methods provides a way for the user to intervene in the depth estimation;
+once the model misjudges a TCP image, no targeted local correction is possible.
+To address these difficulties, this study builds on Marigold-DC,
+introduces a human-in-the-loop sparse depth control point annotation mechanism,
+and combines it with \textit{ChinesePaintingLoss} designed specifically for TCP,
+so that the depth estimates conform to the visual semantics of the painting while preserving the user's active control over key regions,
+thereby generating convincing 2.5D videos even under the extreme scarcity of real 3D data.
 
-\section{基於擴散模型的新視角合成與視訊生成}
+\section{Diffusion-Based Novel View Synthesis and Video Generation}
 
-新視角合成（novel view synthesis）與視訊生成的結合，
-為從單張圖像生成具有攝影機運動感的影片提供了可行框架。
+The combination of novel view synthesis and video generation
+provides a feasible framework for generating videos with a sense of camera motion from a single image.
 
-ViewCrafter \cite{viewcrafter} 以單張圖片與點雲渲染結果為條件，
-利用視訊擴散模型生成高保真度（high-fidelity）的新視角合成影片。
-其關鍵貢獻在於以點雲渲染提供幾何先驗，
-驅動擴散模型在去噪過程中維持場景的三維一致性，
-同時填補因視角偏移而露出的遮擋區域，
-此論文顯示以點雲作為幾何引導是驅動視訊擴散模型生成三維一致影片的有效手段。
-ViewCrafter 架構如圖~\ref{fig:viewcrafterrw}~所示。
+ViewCrafter \cite{viewcrafter} conditions on a single image and point-cloud renderings
+and employs a video diffusion model to generate high-fidelity novel view synthesis videos.
+Its key contribution lies in providing geometric priors through point-cloud rendering,
+driving the diffusion model to maintain the 3D consistency of the scene during denoising
+while filling the occluded regions exposed by viewpoint shifts;
+this work shows that point clouds serve as effective geometric guidance for driving video diffusion models to generate 3D-consistent videos.
+The ViewCrafter architecture is shown in Figure~\ref{fig:viewcrafterrw}.
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=0.9\linewidth]{ViewCrafter.png}
-  \caption{ViewCrafter 流程示意圖。以單張參考圖片與點雲渲染結果為條件，驅動視訊擴散模型在保持三維幾何一致性的前提下合成新視角影片，並填補遮擋區域。}
+  \caption{Illustration of the ViewCrafter pipeline. Conditioned on a single reference image and point-cloud renderings, a video diffusion model synthesizes novel-view videos while maintaining 3D geometric consistency and fills the occluded regions.}
   \label{fig:viewcrafterrw}
 \end{figure}
 
-TrajectoryCrafter \cite{trajectorycrafter} 以擴散模型為核心，
-將單目影片的攝影機路徑轉換至使用者指定的目標軌跡，
-合成出沿新軌跡拍攝的具有真實視差感的影片，
-在自由視角影片生成上取得了顯著進展，如圖~\ref{fig:trajcrafterrw}~所示。
+TrajectoryCrafter \cite{trajectorycrafter} takes a diffusion model as its core
+and redirects the camera path of a monocular video to a user-specified target trajectory,
+synthesizing videos captured along the new trajectory with realistic parallax,
+achieving significant progress in free-viewpoint video generation, as illustrated in Figure~\ref{fig:trajcrafterrw}.
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=0.9\linewidth]{CameraTrajectory.png}
-  \caption{TrajectoryCrafter 流程示意圖。以單目影片與使用者指定的目標攝影機軌跡為條件，驅動擴散模型合成出沿新軌跡拍攝、具有真實視差感的新視角影片。}
+  \caption{Illustration of the TrajectoryCrafter pipeline. Conditioned on a monocular video and a user-specified target camera trajectory, a diffusion model synthesizes novel-view videos captured along the new trajectory with realistic parallax.}
   \label{fig:trajcrafterrw}
 \end{figure}
 
-Uni3C \cite{uni3c} 提出統一的三維強化控制框架，
-以精確的三維攝影機軌跡與人體動作同時作為視訊擴散模型的引導條件。
-其核心模組 PCDController 將點雲渲染結果編碼為幾何引導訊號，
-在去噪過程中施加嚴格的幾何約束，確保生成影片的視角移動與輸入軌跡一致。
-本研究採用 Uni3C 的 PCDController 作為最終視訊生成模組，
-以點雲影片引導視訊擴散模型填補遮擋空洞並維持國畫整體風格。
-另外本研究有針對國畫領域做相對應的專屬改動，
-整體改動詳見第~\ref{sec:video}~節。
-Uni3C 的整體架構如圖~\ref{fig:uni3cpipeline}~所示。
+Uni3C \cite{uni3c} proposes a unified 3D-enhanced control framework
+that simultaneously employs precise 3D camera trajectories and human motion as guidance conditions for a video diffusion model.
+Its core module, PCDController, encodes point-cloud renderings into geometric guidance signals
+and imposes strict geometric constraints during denoising, ensuring that the viewpoint motion of the generated video is consistent with the input trajectory.
+This study adopts the PCDController of Uni3C as the final video generation module,
+using the point-cloud video to guide the video diffusion model in filling occlusion holes while maintaining the overall style of TCP.
+In addition, this study makes corresponding TCP-specific modifications,
+which are detailed in Section~\ref{sec:video}.
+The overall architecture of Uni3C is shown in Figure~\ref{fig:uni3cpipeline}.
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=0.95\linewidth]{uni3c_pipeline.png}
-  \caption{Uni3C 視訊生成架構示意圖。點雲渲染影片經 Wan2.1 的 3D-VAE 編碼為 Point Latent（$c_{\mathrm{pcd}}$），並以六通道 Plücker Ray Embedding 編碼各像素的三維位置與射線方向，作為 PCDController 的兩類引導訊號。第一幀影像透過 Image CLIP 與 Wan-Encoder 提取視覺特徵，連同文字提示一同注入視訊擴散模型（Wan-DiT）的去噪過程。PCDController 透過零初始化線性層投影後，以 Element-wise Addition 的方式將幾何訊號注入 Wan-I2V 前 20 層的去噪過程，確保生成影片的攝影機軌跡與點雲渲染結果一致，最終由 Wan-Decoder 解碼輸出完整的 2.5D 影片。}
+  \caption{Illustration of the Uni3C video generation architecture. The point-cloud rendered video is encoded by the 3D-VAE of Wan2.1 into the point latent ($c_{\mathrm{pcd}}$), and a six-channel Pl\"ucker ray embedding encodes the 3D position and ray direction of each pixel; these serve as the two guidance signals of PCDController. The visual features of the first frame are extracted by Image CLIP and the Wan-Encoder and injected, together with the text prompt, into the denoising process of the video diffusion model (Wan-DiT). After projection through zero-initialized linear layers, PCDController injects the geometric signals into the first 20 layers of the Wan-I2V denoising process via element-wise addition, ensuring that the camera trajectory of the generated video is consistent with the point-cloud renderings; finally, the Wan-Decoder decodes and outputs the complete 2.5D video.}
   \label{fig:uni3cpipeline}
 \end{figure}
 
-上述方法雖然在點雲引導視訊生成領域取得重要進展，
-但均以真實場景影像為主要訓練資料，對國畫的特殊視覺特性缺乏針對性設計。
-ViewCrafter 的深度估算模組對留白構圖與抽象筆觸的空間語意理解有限，
-直接套用易在留白區域產生錯誤深度分布，進而導致點雲變形與影片抖動；
-TrajectoryCrafter 以單目影片為輸入，需要時序資訊作為前提，
-無法直接從單張靜態國畫生成攝影機運動，且同樣以真實場景影片訓練，
-對國畫的視覺風格缺乏實現的能力；
-Uni3C 雖提供更精確的幾何引導機制，但同樣未針對國畫的風格保持設計，
-去噪過程中可能對筆觸紋理造成過度平滑或產生幻覺。
-本研究在上述框架的基礎上提出三項針對國畫的改進：
-（一）\textbf{人機協作深度標注}：先以 Depth Anything V2 \cite{depthanythingv2} 取得初步深度圖供人工觀察，
-再由使用者以稀疏控制點標注誤判區域，以控制點為引導執行 Marigold-DC，
-將人類空間意圖注入深度估算過程，取代上述框架中無法干預的自動深度估算；
-（二）\textbf{國畫專屬損失函數}：設計 \textit{ChinesePaintingLoss}，
-涵蓋留白正則化與筆觸感知平滑損失，
-將國畫特有的視覺語意轉化為可微分的優化目標，使深度圖符合畫意而非真實場景幾何；
-（三）\textbf{風格保持視訊生成}：以 Uni3C 的 PCDController 取代 ViewCrafter 的視訊擴散控制模組，
-在更嚴格的幾何約束下驅動視訊擴散模型，同時利用其擴散先驗在填補遮擋空洞時維持國畫筆墨風格。
-上述改進的核心難點在於國畫深度標注資料極度稀缺，無法以監督式方式直接訓練；
-本研究因此採用人機協作與擴散先驗相結合的策略，在有限資料條件下仍能產生符合畫意的深度估算與 2.5D 影片。
+Although the above methods have made important progress in point-cloud-guided video generation,
+they are all trained primarily on real-scene imagery and lack designs targeting the special visual characteristics of TCP.
+The depth estimation module of ViewCrafter has limited understanding of the spatial semantics of whitespace composition and abstract brushstrokes;
+direct application easily produces erroneous depth distributions in whitespace regions, which in turn leads to point-cloud distortion and video jitter.
+TrajectoryCrafter takes a monocular video as input and requires temporal information as a prerequisite,
+so it cannot generate camera motion directly from a single static TCP image; it is likewise trained on real-scene videos
+and lacks the capability to realize the visual style of TCP.
+Uni3C provides a more precise geometric guidance mechanism, yet it is likewise not designed for TCP style preservation,
+and its denoising process may oversmooth brushstroke textures or produce hallucinations.
+Building on these frameworks, this study proposes three TCP-specific improvements:
+(1) \textbf{human-in-the-loop depth annotation}: a rough depth map is first obtained with Depth Anything V2 \cite{depthanythingv2} for human inspection,
+the user then annotates the misjudged regions with sparse control points, and Marigold-DC is executed with these control points as guidance,
+injecting human spatial intent into the depth estimation process and replacing the non-intervenable automatic depth estimation of the above frameworks;
+(2) \textbf{a TCP-specific loss function}: we design \textit{ChinesePaintingLoss},
+which covers whitespace regularization and a brushstroke-aware smoothness loss,
+translating the visual semantics unique to TCP into differentiable optimization objectives so that the depth map follows the painting's intent rather than real-scene geometry;
+(3) \textbf{style-preserving video generation}: the PCDController of Uni3C replaces the video diffusion control module of ViewCrafter,
+driving the video diffusion model under stricter geometric constraints while exploiting its diffusion priors to maintain the ink-and-brush style of TCP when filling occlusion holes.
+The core difficulty of these improvements lies in the extreme scarcity of TCP depth annotation data, which precludes direct supervised training;
+this study therefore adopts a strategy that combines human-in-the-loop collaboration with diffusion priors, producing depth estimates and 2.5D videos consistent with the painting's intent even under limited data.

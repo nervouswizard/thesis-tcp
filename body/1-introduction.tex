@@ -1,122 +1,137 @@
 % !TEX root = ../main.tex
 \hspace{24pt}
 
-\section{研究動機}
+\section{Motivation}
 
-中國傳統國畫（Traditional Chinese Painting，以下簡稱 TCP）是中國傳統藝術的繪畫形式，
-而其中又以水墨畫尤為出名，其特色是以墨色濃淡和留白構圖來表現遠近關係與空間感。
-然而國畫本質上是靜態的二維圖片，缺乏動態感。
-在數位媒體高度發展的當代，觀眾對視覺內容的期待已從靜態轉向動態，
-社群平台與數位展覽也更傾向以影片形式呈現藝術作品以吸引更廣泛的受眾。
-若國畫能以動畫影片的形式呈現，不僅能讓觀者更直觀地感受畫作中的空間層次，
-也有助於傳統藝術在數位時代觸及更年輕的族群，延續其文化價值。
-近年來已有多項研究致力於真實世界物體的 3D 模型建構 \cite{zero123}\cite{difix3d}
-與場景級的 2.5D 影片呈現 \cite{viewcrafter}\cite{wonderworld}\cite{trajectorycrafter}，
-其中 2.5D 影片（2.5D video）是一種介於平面二維影像與完整三維重建之間的視覺呈現技術，
-以單張圖片的深度資訊驅動攝影機沿預設軌跡移動，
-在不建立完整幾何模型的前提下，生成具有視差感（parallax）的動畫影片，
-使靜態圖片呈現出空間縱深的立體感受。
-由於國畫的數位資料量相較於真實世界的影像資料較為稀少，
-完整的三維重建（3D reconstruction）技術需要大量多視角資料或精確的幾何標注，
-在國畫領域難以取得足夠的訓練素材，實際應用上面臨極高的門檻。
-相較之下，透過擴散模型（diffusion model）的技術，
-僅需單張圖片即可合成 2.5D 影片，
-在有限的資料條件下更容易取得具說服力的視覺成果。
-若能將此技術應用於國畫，將可使傳統藝術以更吸引人的方式呈現，讓觀看者更能夠有身臨其境的感受。
-已有研究如 ViewCrafter \cite{viewcrafter} 探索以擴散模型從單張圖片合成具有視差感的影片，
-在真實場景照片上展現了良好的視覺成果，顯示此方向的可行性。
-然而 ViewCrafter 以真實照片作為主要訓練資料，
-在處裡國畫特有的留白構圖、抽象筆觸與缺乏立體線索等特性時，
-容易產生不自然的深度判斷與影像扭曲，難以直接套用。
+Traditional Chinese Painting (TCP) is a classical form of Chinese visual art,
+of which ink wash painting is the most renowned;
+it conveys distance and a sense of space through ink-tone variation and the deliberate use of white space.
+A painting, however, is inherently a static two-dimensional image and lacks any sense of motion.
+In today's digital media environment, audience expectations have shifted from static toward dynamic content,
+and social platforms as well as digital exhibitions increasingly present artworks in video form to reach a broader audience.
+Presenting TCP as animated videos would not only allow viewers to perceive the spatial layering of a painting more intuitively,
+but would also help traditional art reach younger generations in the digital era and extend its cultural value.
+In recent years, numerous studies have addressed 3D model reconstruction of real-world objects \cite{zero123}\cite{difix3d}
+and scene-level 2.5D video presentation \cite{viewcrafter}\cite{wonderworld}\cite{trajectorycrafter}.
+A 2.5D video is a visual representation that lies between a flat 2D image and a full 3D reconstruction:
+driven by the depth information of a single image, a virtual camera moves along a predefined trajectory,
+producing an animated video with parallax that conveys spatial depth without constructing a complete geometric model.
+Since digitized TCP data are far scarcer than real-world imagery,
+full 3D reconstruction---which requires large multi-view datasets or precise geometric annotations---faces
+prohibitively high barriers in the TCP domain.
+By contrast, diffusion-model-based techniques can synthesize a 2.5D video from a single image,
+making convincing visual results much more attainable under limited data.
+Applying such techniques to TCP would allow traditional art to be presented in a more engaging and immersive manner.
+Prior work such as ViewCrafter \cite{viewcrafter} has explored synthesizing parallax videos from a single image with diffusion models
+and demonstrated compelling results on real-world photographs, confirming the feasibility of this direction.
+However, ViewCrafter is trained primarily on real photographs;
+when confronted with TCP-specific characteristics---white-space composition, abstract brushstrokes,
+and the absence of photometric depth cues---it tends to produce unnatural depth estimates and image distortions,
+and therefore cannot be applied directly.
 
-雖然現今擴散模型憑藉其涵蓋範圍廣泛的大規模訓練資料 \cite{LAION-5B}，
-具備強大的視覺先驗知識（visual semantic prior），但若直接由單張國畫圖像生成 2.5D 影片，仍會遇到顯著的困難。
-這是因為在模型的先驗知識中，國畫素材幾乎都以平面圖像的形式出現，
-導致模型傾向將輸入判斷為一張掛在牆上的平面物件，
-最終生成的影片看起來只是攝影機在對著畫框旋轉，而非在場景的三維空間中移動。
-因此正確的景深資訊必須在生成影片前先行獲取，才能讓模型理解畫面的真實空間結構。
+Although modern diffusion models possess strong visual semantic priors
+acquired from large-scale and wide-coverage training data \cite{LAION-5B},
+generating a 2.5D video directly from a single TCP image remains highly problematic.
+In the prior knowledge of these models, TCP material appears almost exclusively in the form of flat images,
+so a model tends to interpret the input as a flat object hanging on a wall;
+the generated video then merely shows a camera orbiting around a picture frame
+rather than moving through the three-dimensional space of the scene.
+Accurate depth information must therefore be obtained before video generation,
+so that the model can understand the true spatial structure of the painting.
 
-而目前常見的基於擴散模型的單目深度估算方法（diffusion-based monocular depth estimation）
-以大量真實照片作為訓練資料，在處理國畫特有的留白與抽象筆觸（brushstroke）時容易產生明顯的誤判。
-國畫的表現方式與真實照片差異很大：
-大片留白在畫中代表遠景，但模型可能根據幾何先驗知識將其判斷為近處的空白區域；
-墨色較濃的地方不一定代表距離較近的物體，而是畫家筆力強調的表現。
-這些差異導致直接套用現有模型如 Marigold \cite{marigold} 時，深度圖的結果往往不符合畫面的實際空間關係。
-此外真實國畫的訓練資料集難以輕易取得，
-透過傳統人工標注的方式也難以累積足夠的資料量，
-使得對現有模型進行 fine-tuning 或從頭訓練一個專門針對國畫的深度估算擴散模型均不可行。
+Meanwhile, prevailing diffusion-based monocular depth estimation methods are trained on
+large collections of real photographs and are prone to notable misjudgments
+when handling the white space and abstract brushstrokes unique to TCP.
+The visual language of TCP differs fundamentally from that of photographs:
+large blank regions in a painting represent distant scenery,
+yet a model may interpret them as nearby empty planes according to its geometric priors;
+regions of dense ink do not necessarily indicate nearby objects,
+but rather the painter's expressive emphasis.
+Owing to these differences, directly applying existing models such as Marigold \cite{marigold}
+often yields depth maps inconsistent with the actual spatial relations of the painting.
+Furthermore, datasets of authentic TCP with depth annotations are difficult to obtain,
+and conventional manual annotation cannot accumulate a sufficient amount of data,
+rendering both fine-tuning existing models and training a TCP-specific depth estimation
+diffusion model from scratch infeasible.
 
-\section{研究目標與貢獻}
+\section{Research Objectives and Contributions}
 
-為了解決上述問題，本研究引入 Marigold-DC \cite{marigolddc}，
-此方法允許使用者提供少量的稀疏深度控制點（sparse depth hints）來引導模型的估算結果，
-無須對全圖進行完整標注，大幅降低人工成本。
-此外原始 Marigold-DC 的損失函數（loss function）僅衡量幾何準確性（geometric accuracy）。
-本研究考慮國畫特有的筆觸結構與留白語意，
-對其損失函數進行改良，
-設計了專為國畫特性量身打造的 \textit{ChinesePaintingLoss}（詳見第~\ref{sec:depth}~節），
-使深度估算結果更符合國畫的空間表達慣例。
+To address the above problems, this study adopts Marigold-DC \cite{marigolddc},
+which allows users to guide the estimation with a small number of sparse depth control points (sparse depth hints)
+without dense full-image annotation, thereby greatly reducing manual effort.
+In addition, the loss function of the original Marigold-DC measures geometric accuracy only.
+Taking into account the brushstroke structure and white-space semantics unique to TCP,
+this study improves the loss function and designs \textit{ChinesePaintingLoss},
+a composite loss tailored to the characteristics of Chinese painting (detailed in Section~\ref{sec:depth}),
+so that the estimated depth better follows the spatial conventions of TCP.
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\textwidth]{pipeline}
-  \caption{本研究提出之國畫 2.5D 影片生成流程（TCP-Uni3C）。
-  以單張國畫 Input image 為輸入，首先透過深度估算（Depth Estimate）取得初步深度圖 $D_{\mathrm{rough}}$；
-  使用者依據 $D_{\mathrm{rough}}$ 標注（Manual adjustiment）稀疏深度控制點 $G$，
-  作為改進後的 Marigold-DC 的引導條件，輸出精煉深度圖 $D_{\mathrm{refined}}$；
-  $D_{\mathrm{refined}}$ 再透過 Depth Anything V3 反投影為三維點雲（Point Cloud，$\mathit{PCD}$）；
-  最終以 Uni3C 沿預設攝影機軌跡渲染點雲影片 $V_{\mathit{pcd}}$，
-  並驅動視訊擴散模型生成流暢的 2.5D 影片。}
+  \caption{The proposed 2.5D video generation pipeline for Traditional Chinese Painting.
+  Given a single TCP input image, depth estimation first yields a rough depth map $D_{\mathrm{rough}}$;
+  based on $D_{\mathrm{rough}}$, the user annotates sparse depth control points $G$ (manual adjustment),
+  which serve as guidance for the improved Marigold-DC to output a refined depth map $D_{\mathrm{refined}}$;
+  $D_{\mathrm{refined}}$ is then unprojected into a three-dimensional point cloud ($\mathit{PCD}$) via Depth Anything V3;
+  finally, Uni3C renders the point-cloud video $V_{\mathit{pcd}}$ along a predefined camera trajectory
+  and drives a video diffusion model to generate a smooth 2.5D video.}
   \label{fig:pipeline}
 \end{figure}
 
-雖然透過稀疏深度控制點的加入，可以取得相對準確的深度圖，
-但若嘗試直接將深度圖與攝影機軌跡（camera trajectory）
-作為視訊擴散模型（video diffusion model）的輸入，
-會面臨幾何資訊不足的問題。
-深度圖是以影像空間（image space）表示的二維資料，
-無法直接用於渲染新視角下的場景，
-模型缺乏足夠的三維幾何線索來理解不同視角間物件的遮擋與位移關係，
-導致生成的影片缺乏真實的視差感。
+Although the injected sparse depth control points yield a relatively accurate depth map,
+directly feeding the depth map together with a camera trajectory into a video diffusion model
+still suffers from insufficient geometric information.
+A depth map is two-dimensional data expressed in image space;
+it cannot be used directly to render the scene from novel viewpoints,
+and the model lacks sufficient three-dimensional geometric cues
+to reason about occlusion and displacement of objects across viewpoints,
+so the generated video lacks convincing parallax.
 
-因此透過本研究所提出的國畫估算深度流程，
-取得準確的國畫深度值後，
-再透過反投影（unprojection）將深度圖轉為帶有原圖色彩的三維點雲（point cloud）。
-點雲在三維空間中明確記錄每個點的幾何位置，
-可以沿著預設的攝影機軌跡進行標準的圖形學光柵化渲染（rasterization），
-產生一段富含幾何資訊、具有真實視差感的初步 2.5D 點雲影片。
-此渲染結果雖帶有因視角偏移而露出的遮擋破洞（holes），
-卻為後續的視訊擴散模型提供了明確的空間幾何條件。
-最後本研究針對國畫領域設計了專屬的文字提示（text prompt），
-以引導擴散模型生成符合筆墨風格的補全內容，
-並依據畫作尺寸與點雲幾何自動計算圓形攝影機軌跡參數，
-確保視角偏移的幅度與速率符合國畫的視覺節奏。
-上述條件連同點雲影片一併輸入 Uni3C \cite{uni3c}，
-由視訊擴散模型在幾何約束的引導下填補空洞，
-輸出流暢完整的 2.5D 影片。
+Therefore, after obtaining accurate TCP depth values through the proposed estimation pipeline,
+we unproject the depth map into a three-dimensional point cloud colored by the original image.
+The point cloud explicitly records the geometric position of every point in 3D space
+and can be rendered along a predefined camera trajectory using standard rasterization,
+producing a preliminary 2.5D point-cloud video that is rich in geometric information and exhibits true parallax.
+Although the rendered result contains occlusion holes exposed by viewpoint shifts,
+it provides the subsequent video diffusion model with explicit spatial-geometric conditions.
+Finally, this study designs text prompts dedicated to the TCP domain
+to steer the diffusion model toward completions consistent with the ink-and-brush style,
+and automatically computes the parameters of a circular camera trajectory
+from the painting size and the point-cloud geometry,
+ensuring that the magnitude and speed of viewpoint shifts match the visual rhythm of TCP.
+These conditions, together with the point-cloud video, are fed into Uni3C \cite{uni3c},
+whose video diffusion model fills the holes under geometric guidance
+and outputs a smooth and complete 2.5D video.
 
-本研究的目標是建立 TCP-Uni3C——一套完整的端到端流程，
-讓使用者只需提供一張國畫圖片，搭配少量的人工深度標注，
-即可產生具有景深感的 2.5D 影片，使傳統國畫得以動畫形式呈現。
-整體流程如圖~\ref{fig:pipeline} 所示。
+The goal of this study is to establish TCP-Uni3C---a complete end-to-end pipeline
+with which a user provides only a single TCP image and a small number of manual depth annotations
+to obtain a 2.5D video with a convincing sense of depth,
+enabling traditional Chinese paintings to be presented in animated form.
+The overall pipeline is illustrated in Figure~\ref{fig:pipeline}.
 
-值得一提的是，本研究並非純粹的自動化黑盒系統，而是在流程的多個層次提供使用者控制介面：
-使用者可透過稀疏深度控制點干預空間語意、透過攝影機軌跡參數（如旋轉角度、平移距離）設計鏡頭運動，
-並可藉由文字提示引導視訊擴散模型生成符合預期的畫面風格，使最終影片的呈現方式具有一定的可塑性。
+It is worth noting that this pipeline is not a purely automatic black-box system;
+instead, it provides user controls at multiple levels:
+users may intervene in the spatial semantics via sparse depth control points,
+design the camera motion via trajectory parameters (e.g., rotation angles and translation distances),
+and guide the video diffusion model toward the desired visual style via text prompts,
+giving the final video a considerable degree of controllability.
 
-本研究的主要貢獻如下：
+The main contributions of this study are summarized as follows:
 
 \begin{itemize}
-  \item 針對現有擴散式深度估算模型在國畫風格圖像上的估算偏差問題，
-        設計一套互動式稀疏控制點標注介面，
-        使用者可直接於畫面上點選位置並指定深度值，
-        將標注結果便捷地輸入 Marigold-DC 作為引導條件，
-        僅需少量人工標注即可有效修正深度圖中的錯誤區域。
+  \item To correct the estimation bias of existing diffusion-based depth estimation models on TCP-style images,
+        we design an interactive sparse-control-point annotation interface
+        with which users click positions directly on the image and assign depth values;
+        the annotations are conveniently fed into Marigold-DC as guidance conditions,
+        so that a small number of manual hints effectively rectify erroneous regions in the depth map.
 
-  \item 設計專為國畫特性量身打造的複合損失函數 \textit{ChinesePaintingLoss}，
-        在幾何準確性約束的基礎上，引入筆觸感知平滑損失與留白正規化，
-        使精煉深度圖同時滿足控制點數值約束與國畫的空間語意慣例。
+  \item We design \textit{ChinesePaintingLoss}, a composite loss function tailored to the characteristics of TCP,
+        which augments the geometric-accuracy constraint with a brushstroke-aware smoothness loss
+        and a whitespace regularization term,
+        so that the refined depth map simultaneously satisfies the numerical constraints of the control points
+        and the spatial-semantic conventions of Chinese painting.
 
-  \item 提出 TCP-Uni3C——一套以單張國畫圖片搭配少量人工深度標注為輸入、生成 2.5D 影片的完整端到端流程，
-        無須建構三維模型或蒐集大規模國畫訓練資料集。
+  \item We propose TCP-Uni3C---a complete end-to-end pipeline that generates a 2.5D video
+        from a single TCP image and a small number of manual depth annotations,
+        without constructing 3D models or collecting large-scale TCP training datasets.
 \end{itemize}
